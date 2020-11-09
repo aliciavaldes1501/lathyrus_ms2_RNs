@@ -1,2 +1,4 @@
 # lathyrus_ms2_RNs
 Second Lathyrus paper, about selection on reaction norms for flowering time
+
+Study investigating selection on phenotypic plasticity of flowering time in the spring-flowering perennial herb Lathyrus vernus. We use 22 years of data on flowering phenology and fitness to evaluate individual reaction norms of flowering time to among-year climatic variation and to quantified both their elevation (representing the average flowering time) and slope (representing the plasticity in flowering time). We then assess among-individual variation in the slope and elevation of reaction norms for flowering time and investigate if this variation is under selection. We also evaluate if there is among-year variation in selection on reaction norms, and if this variation is related to climatic variation.
