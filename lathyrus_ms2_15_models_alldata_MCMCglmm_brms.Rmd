@@ -62,12 +62,21 @@ vif.MCMCglmm <- function (fit, intercept.columns = c(1)) {
 ```
 
 ```{r load models, include=FALSE}
-Load previously run models so that they are not run when knitting (takes long time)
+# Load previously run models so that they are not run when knitting (takes long time)
 load("output/univar.FFD.all.RData")
 load("output/univar.FFD_RR.all.RData")
 load("output/univar.FFD.all.brm.RData")
-load("output/univar.FFD_RR.all.brm.brm.RData")
+load("output/univar.FFD_RR.all.brm.RData")
 load("output/bivar1.all.RData")
+load("output/bivar2.all.RData")
+load("output/bivar1.all.brm.nb.RData")
+load("output/bivar1.all.brm.OLRE.RData")
+load("output/bivar1.all.brm.pois.RData")
+load("output/bivar2.all.brm.nb.RData")
+load("output/bivar3.all.brm.nb.RData")
+load("output/bivar3.all.RData")
+load("output/bivar4.all.RData")
+load("output/bivar4.all.brm.nb.RData")
 ```
 
 Read data
