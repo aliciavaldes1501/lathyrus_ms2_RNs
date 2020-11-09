@@ -93,12 +93,14 @@ Number of individuals in each period:
 length(with(subset(datadef,period=="old"),unique(id)))
 length(with(subset(datadef,period=="new"),unique(id)))
 ```
+
 Number of observations in each period:
 
 ```{r}
 nrow(subset(datadef,period=="old"))
 nrow(subset(datadef,period=="new"))
 ```
+
 Number of cases with FFD in each period:
 
 ```{r}
@@ -188,7 +190,6 @@ univar.FFD_RR.all_intslope <-
   univar.FFD_RR.all$VCV[,"cmean_4:(Intercept).id"]/
 (sqrt(univar.FFD_RR.all$VCV[,"(Intercept):(Intercept).id"])*
 sqrt(univar.FFD_RR.all$VCV[,"cmean_4:cmean_4.id"]))
-plot(univar.FFD_RR.all_intslope)
 posterior.mode(univar.FFD_RR.all_intslope)
 HPDinterval(univar.FFD_RR.all_intslope) 
 ```
@@ -211,9 +212,9 @@ ggplot(BLUPs_MCMC.all, aes(id, slope)) +
   theme(axis.text.x = element_blank())
 ```
 
-```{r BLUPs_all20, echo=FALSE, fig.height=8, fig.width=8}
+```{r BLUPs_all20, echo=FALSE, fig.height=4, fig.width=4}
 ggplot(BLUPs_MCMC.all, aes(intercept, slope)) +
-  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) +
+  geom_point(aes(group = id, colour = id), size = 2, alpha = 0.5) +
   xlab("BLUP intercept estimate") +
   ylab("BLUP slope estimate") + my_theme()
 ```
@@ -245,10 +246,8 @@ save(univar.FFD.all.brm,
      file="output/univar.FFD.all.brm.RData")
 ```
 
-```{r fig.height=6, fig.width=6}
+```{r }
 summary(univar.FFD.all.brm)
-plot(univar.FFD.all.brm)
-conditional_effects(univar.FFD.all.brm)
 ```
 
 ### Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope
@@ -262,15 +261,13 @@ save(univar.FFD_RR.all.brm,
      file="output/univar.FFD_RR.all.brm.RData")
 ```
 
-```{r fig.height=6, fig.width=6}
+```{r}
 summary(univar.FFD_RR.all.brm) 
-plot(univar.FFD_RR.all.brm)
-conditional_effects(univar.FFD_RR.all.brm)
 ```
 
 #### Extract BLUPs from this model
 
-Check that this is the correct way!
+This code needs to be checked - not sure that this is the correct way to extract BLUPs!
 
 ```{r}
 BLUPs_MCMC.all.brms  <- cbind(as.factor(c(1:837)),
@@ -299,14 +296,6 @@ ggplot(BLUPs_MCMC.all.brms, aes(id, slope)) +
 ```
 
 ```{r, echo=FALSE, fig.height=4, fig.width=10}
-ggplot(BLUPs_MCMC.all.brms, aes(id, slope)) + 
-  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
-  ylab("Plasticity (BLUP slope estimate)") +
-  geom_hline(yintercept = 0, lty = 2) + my_theme() +
-  theme(axis.text.x = element_blank())
-```
-
-```{r, echo=FALSE, fig.height=4, fig.width=10}
 BLUPs_MCMC.all.brms$id_ordered <- factor(BLUPs_MCMC.all.brms$id,
                                     levels = BLUPs_MCMC.all.brms$id[order(BLUPs_MCMC.all.brms$slope)])
 ggplot(BLUPs_MCMC.all.brms, aes(id_ordered, slope)) +
@@ -321,6 +310,8 @@ ggplot(BLUPs_MCMC.all.brms, aes(id_ordered, slope)) +
 Fixed effects can be compared directly between MCMCglmm and brms outputs.
 
 From Pieter's email: The group-level (random) effects reported by brms are standard deviations and correlations rather than the variances and covariances that mcmcglmm outputs. We need to square all the mcmc samples from the posterior then take their mean to get true estimates of the variance from brms (then we can compare them).
+
+The code for these comparisons needs to be checked!
 
 ### FFD with random effects of year and individual-intercept
 
@@ -372,7 +363,7 @@ univar.FFD_RR.all.brm_year_sd_id_cmean_4<-(univar.FFD_RR.all.brm_asmcmc[,4]^2)
 univar.FFD_RR.all.brm_resid <- (univar.FFD_RR.all.brm_asmcmc[,7]^2) 
 # sigma^2 (residual)
 
-kable(rbind(MCMCglmm=summary(univar.FFD_RR.all$VCV)$statistics[,1],
+kable(cbind(MCMCglmm=summary(univar.FFD_RR.all$VCV)$statistics[,1],
       brms=as.vector(cbind(mean(univar.FFD_RR.all.brm_year),
                            mean(univar.FFD_RR.all.brm_id_intercept),
                            mean(univar.FFD_RR.all.brm_year_cor_id_intercept_cmean_4),
@@ -415,6 +406,7 @@ head(datadef_total)
 nrow(subset(datadef_total,is.na(shoot_vol_mean))) 
 # 46 ids with no info on shoot volume
 ```
+
 Compare distributions of mean fitness per year of study and mean fitness per flowering event between old and new periods:
 
 ```{r message=FALSE, warning=FALSE}
@@ -527,14 +519,13 @@ kable(diag(autocorr(bivar1.all$VCV)[2, , ]),caption="Autocorrelation")
 
 For interpretation of covariances, we convert them to correlations using the formula for a correlation with the posterior distributions of our (co)variance components. This gives us a distribution of correlation values that we can use to calculate estimates and 95% credible intervals (code adapted from Houslay & Wilson 2017 Behav. Ecol.).
 
-Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and  between fitness and variation in slopes for FFD:
+Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and between fitness and variation in slopes for FFD:
 
 ```{r MCMCglmm models 6, fig.height=2.5, fig.width=6}
 cor_bivar1.all_intslope <- 
   bivar1.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
 (sqrt(bivar1.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
 sqrt(bivar1.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar1.all_intslope)
 posterior.mode(cor_bivar1.all_intslope)
 HPDinterval(cor_bivar1.all_intslope) 
 
@@ -542,7 +533,6 @@ cor_bivar1.all_intfit <-
   bivar1.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
   (sqrt(bivar1.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar1.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
-plot(cor_bivar1.all_intfit)
 posterior.mode(cor_bivar1.all_intfit)
 HPDinterval(cor_bivar1.all_intfit)
 
@@ -550,10 +540,10 @@ cor_bivar1.all_slopefit <-
   bivar1.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
   (sqrt(bivar1.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar1.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar1.all_slopefit)
 posterior.mode(cor_bivar1.all_slopefit)
 HPDinterval(cor_bivar1.all_slopefit)
 ```
+
 Correlation between intercepts and slopes for FFD is smaller than in univariate models. Why?
 
 Intercepts and slopes of RNs are positively correlated: Plants that flower earlier on average are also more responsive to temperature. Fitness is negatively correlated with the intercept, but not with the slope of the RN: individuals that flower earlier on average have higher fitness, but responsiveness to temperature does not seem to affect fitness.
@@ -581,11 +571,6 @@ S.bivar1.all.mode
 posterior.mode(mcmc(S.bivar1.all)) # This is exactly the same as above
 HPDinterval(mcmc(S.bivar1.all))
 
-# Plot posterior distribution of selection differentials
-par(mfrow = c(1,2))
-plot(density(S.bivar1.all[,1]), main = "S_intercepts")
-plot(density(S.bivar1.all[,2]), main = "S_slopes")
-
 # Estimate selection gradients for intercept and slope (beta = S / P)
 # on each sample of posterior and extract their mode
 n <- length(bivar1.all$VCV[,2])   # sample size
@@ -607,11 +592,6 @@ for (i in 1:n) {
 colnames(beta_post_bivar1.all) <- c("beta_intercepts", "beta_slopes")
 posterior.mode(mcmc(beta_post_bivar1.all))
 HPDinterval(mcmc(beta_post_bivar1.all))
-
-# Plot posterior distribution of selection gradients
-par(mfrow = c(1,2))
-plot(density(beta_post_bivar1.all[,1]), main = "beta_intercepts")
-plot(density(beta_post_bivar1.all[,2]), main = "beta_slopes")
 ```
 
 The selection differentials are "significant" for RN intercept (negative), but not for RN slope. The selection gradients are significant for both RN intercept (negative) and slope (positive). This means that there is significant total and direct selection on the intercept of the RN, selecting for an earlier flowering time on average. Not sure how to interpret the selection on the slope though. The selection differential is not significant, meaning that there is no total selection on the slope, but the selection gradient is significant and positive. I guess this means that, after correcting for the covariance between intercepts and slopes, there is significant selection on the slope. And the selection gradient for the slope being positive means that there is selection for more positive slopes (i.e. less negative = individuals less responsive to temperature, because the relationship among FFD and temperature is negative: earlier flowering (lower FFD) with higher temperatures). Am I interpreting this correctly?
@@ -682,6 +662,7 @@ datadef.stack2$id <- as.factor(datadef.stack2$id)
 datadef.stack2$year <- as.factor(datadef.stack2$year)
 head(datadef.stack2)
 ```
+
 ```{r eval=FALSE, include=TRUE}
 bivar2.all <- MCMCglmm(fitness.FFD.stack ~ variable - 1 +
                          # ^ means for each variable 
@@ -718,14 +699,13 @@ kable(diag(autocorr(bivar2.all$Sol)[2, , ]),caption="Autocorrelation")
 kable(diag(autocorr(bivar2.all$VCV)[2, , ]),caption="Autocorrelation")
 ```
 
-Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and  between fitness and variation in slopes for FFD:
+Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and between fitness and variation in slopes for FFD:
 
 ```{r fig.height=2.5, fig.width=6}
 cor_bivar2.all_intslope <- 
   bivar2.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
 (sqrt(bivar2.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
 sqrt(bivar2.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar2.all_intslope)
 posterior.mode(cor_bivar2.all_intslope)
 HPDinterval(cor_bivar2.all_intslope)
 
@@ -733,7 +713,6 @@ cor_bivar2.all_intfit <-
   bivar2.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
   (sqrt(bivar2.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar2.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
-plot(cor_bivar2.all_intfit)
 posterior.mode(cor_bivar2.all_intfit)
 HPDinterval(cor_bivar2.all_intfit)
 
@@ -741,7 +720,6 @@ cor_bivar2.all_slopefit <-
   bivar2.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
   (sqrt(bivar2.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar2.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar2.all_slopefit)
 posterior.mode(cor_bivar2.all_slopefit)
 HPDinterval(cor_bivar2.all_slopefit)
 ```
@@ -770,11 +748,6 @@ S.bivar2.all.mode
 posterior.mode(mcmc(S.bivar2.all)) # This is exactly the same as above
 HPDinterval(mcmc(S.bivar2.all))
 
-# Plot posterior distribution of selection differentials
-par(mfrow = c(1,2))
-plot(density(S.bivar2.all[,1]), main = "S_intercepts")
-plot(density(S.bivar2.all[,2]), main = "S_slopes")
-
 # Estimate selection gradients for intercept and slope (beta = S / P)
 # on each sample of posterior and extract their mode
 n <- length(bivar2.all$VCV[,2])   # sample size
@@ -796,16 +769,11 @@ for (i in 1:n) {
 colnames(beta_post_bivar2.all) <- c("beta_intercepts", "beta_slopes")
 posterior.mode(mcmc(beta_post_bivar2.all))
 HPDinterval(mcmc(beta_post_bivar2.all))
-
-# Plot posterior distribution of selection gradients
-par(mfrow = c(1,2))
-plot(density(beta_post_bivar2.all[,1]), main = "beta_intercepts")
-plot(density(beta_post_bivar2.all[,2]), main = "beta_slopes")
 ```
 
 Selection coefficients give similar results as in model without shoot volume.
 
-### Mean fitness per year of study 
+### Mean fitness per year of study
 
 #### With no condition variable
 
@@ -880,14 +848,13 @@ kable(diag(autocorr(bivar3.all$Sol)[2, , ]),caption="Autocorrelation")
 kable(diag(autocorr(bivar3.all$VCV)[2, , ]),caption="Autocorrelation")
 ```
 
-Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and  between fitness and variation in slopes for FFD:
+Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and between fitness and variation in slopes for FFD:
 
 ```{r fig.height=2.5, fig.width=6}
 cor_bivar3.all_intslope <- 
   bivar3.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
 (sqrt(bivar3.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
 sqrt(bivar3.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar3.all_intslope)
 posterior.mode(cor_bivar3.all_intslope)
 HPDinterval(cor_bivar3.all_intslope)
 
@@ -895,7 +862,6 @@ cor_bivar3.all_intfit <-
   bivar3.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
   (sqrt(bivar3.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar3.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
-plot(cor_bivar3.all_intfit)
 posterior.mode(cor_bivar3.all_intfit)
 HPDinterval(cor_bivar3.all_intfit)
 
@@ -903,7 +869,6 @@ cor_bivar3.all_slopefit <-
   bivar3.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
   (sqrt(bivar3.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar3.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar3.all_slopefit)
 posterior.mode(cor_bivar3.all_slopefit)
 HPDinterval(cor_bivar3.all_slopefit)
 ```
@@ -932,11 +897,6 @@ S.bivar3.all.mode
 posterior.mode(mcmc(S.bivar3.all)) # This is exactly the same as above
 HPDinterval(mcmc(S.bivar3.all))
 
-# Plot posterior distribution of selection differentials
-par(mfrow = c(1,2))
-plot(density(S.bivar3.all[,1]), main = "S_intercepts")
-plot(density(S.bivar3.all[,2]), main = "S_slopes")
-
 # Estimate selection gradients for intercept and slope (beta = S / P)
 # on each sample of posterior and extract their mode
 n <- length(bivar3.all$VCV[,2])   # sample size
@@ -958,14 +918,9 @@ for (i in 1:n) {
 colnames(beta_post_bivar3.all) <- c("beta_intercepts", "beta_slopes")
 posterior.mode(mcmc(beta_post_bivar3.all))
 HPDinterval(mcmc(beta_post_bivar3.all))
-
-# Plot posterior distribution of selection gradients
-par(mfrow = c(1,2))
-plot(density(beta_post_bivar3.all[,1]), main = "beta_intercepts")
-plot(density(beta_post_bivar3.all[,2]), main = "beta_slopes")
 ```
 
-The selection differentials are "significant" for RN intercept (negative) but not for slope. The selection gradients are significant for RN intercept (negative) but not for RN slope. This means that there is significant total and direct selection on the intercept of the RN. 
+The selection differentials are "significant" for RN intercept (negative) but not for slope. The selection gradients are significant for RN intercept (negative) but not for RN slope. This means that there is significant total and direct selection on the intercept of the RN.
 
 #### With shoot volume
 
@@ -1067,14 +1022,13 @@ kable(diag(autocorr(bivar4.all$Sol)[2, , ]),caption="Autocorrelation")
 kable(diag(autocorr(bivar4.all$VCV)[2, , ]),caption="Autocorrelation")
 ```
 
-Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and  between fitness and variation in slopes for FFD:
+Among-individual correlation between intercepts and slopes for FFD, between FFD and fitness and between fitness and variation in slopes for FFD:
 
 ```{r fig.height=2.5, fig.width=6}
 cor_bivar4.all_intslope <- 
   bivar4.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
 (sqrt(bivar4.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
 sqrt(bivar4.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar4.all_intslope)
 posterior.mode(cor_bivar4.all_intslope)
 HPDinterval(cor_bivar4.all_intslope)
 
@@ -1082,7 +1036,6 @@ cor_bivar4.all_intfit <-
   bivar4.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
   (sqrt(bivar4.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar4.all$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
-plot(cor_bivar4.all_intfit)
 posterior.mode(cor_bivar4.all_intfit)
 HPDinterval(cor_bivar4.all_intfit)
 
@@ -1090,7 +1043,6 @@ cor_bivar4.all_slopefit <-
   bivar4.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
   (sqrt(bivar4.all$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
      sqrt(bivar4.all$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
-plot(cor_bivar4.all_slopefit)
 posterior.mode(cor_bivar4.all_slopefit)
 HPDinterval(cor_bivar4.all_slopefit)
 ```
@@ -1119,11 +1071,6 @@ S.bivar4.all.mode
 posterior.mode(mcmc(S.bivar4.all)) # This is exactly the same as above
 HPDinterval(mcmc(S.bivar4.all))
 
-# Plot posterior distribution of selection differentials
-par(mfrow = c(1,2))
-plot(density(S.bivar4.all[,1]), main = "S_intercepts")
-plot(density(S.bivar4.all[,2]), main = "S_slopes")
-
 # Estimate selection gradients for intercept and slope (beta = S / P)
 # on each sample of posterior and extract their mode
 n <- length(bivar4.all$VCV[,2])   # sample size
@@ -1145,14 +1092,9 @@ for (i in 1:n) {
 colnames(beta_post_bivar4.all) <- c("beta_intercepts", "beta_slopes")
 posterior.mode(mcmc(beta_post_bivar4.all))
 HPDinterval(mcmc(beta_post_bivar4.all))
-
-# Plot posterior distribution of selection gradients
-par(mfrow = c(1,2))
-plot(density(beta_post_bivar4.all[,1]), main = "beta_intercepts")
-plot(density(beta_post_bivar4.all[,2]), main = "beta_slopes")
 ```
 
-The selection differentials are "significant" for RN intercept (negative), but not for RN slope. The selection gradients are significant for both RN intercept (negative) and slope (positive). 
+The selection differentials are "significant" for RN intercept (negative), but not for RN slope. The selection gradients are significant for both RN intercept (negative) and slope (positive).
 
 ## brms
 
@@ -1160,9 +1102,9 @@ The selection differentials are "significant" for RN intercept (negative), but n
 
 #### With no condition variable
 
-I tried to use the ID-syntax to specify fitness to be correlated with the intercept and slope of FFD on temperature - check that this is correctly done! 
+I tried to use the ID-syntax to specify fitness to be correlated with the intercept and slope of FFD on temperature - check that this is correctly done!
 
-Regarding distributions, I tried Poisson distribution for fitness, but not sure how eventual overdispersion is handled. I also tried adding and observation-level random effect, and using a negative binomial distribution. Results seem quite similar.
+Regarding distributions, I tried Poisson distribution for fitness, but not sure how eventual overdispersion is handled. I also tried adding an observation-level random effect, and using a negative binomial distribution. Results seem quite similar.
 
 ##### Poisson distribution
 
@@ -1186,8 +1128,6 @@ save(bivar1.all.brm.pois,
 
 ```{r}
 summary(bivar1.all.brm.pois)
-plot(bivar1.all.brm.pois)
-conditional_effects(bivar1.all.brm.pois)
 ```
 
 ###### How to extract selection coefficients from models fitted with brms?
@@ -1210,9 +1150,7 @@ save(bivar1.all.brm.OLRE,
 ```
 
 ```{r}
-summary(bivar1.all.brm.OLRE) 
-plot(bivar1.all.brm.OLRE)
-conditional_effects(bivar1.all.brm.OLRE)
+summary(bivar1.all.brm.OLRE)
 ```
 
 ##### Negative binomial distribution
@@ -1227,9 +1165,7 @@ save(bivar1.all.brm.nb,
 ```
 
 ```{r}
-summary(bivar1.all.brm.nb) 
-plot(bivar1.all.brm.nb)
-conditional_effects(bivar1.all.brm.nb)
+summary(bivar1.all.brm.nb)
 ```
 
 #### With shoot volume
@@ -1251,12 +1187,10 @@ save(bivar2.all.brm.nb,
 ```
 
 ```{r}
-summary(bivar2.all.brm.nb) 
-plot(bivar2.all.brm.nb)
-conditional_effects(bivar2.all.brm.nb)
+summary(bivar2.all.brm.nb)
 ```
 
-### Mean fitness per year of study 
+### Mean fitness per year of study
 
 #### With no condition variable
 
@@ -1277,9 +1211,7 @@ save(bivar3.all.brm.nb,
 ```
 
 ```{r}
-summary(bivar3.all.brm.nb) 
-plot(bivar3.all.brm.nb)
-conditional_effects(bivar3.all.brm.nb)
+summary(bivar3.all.brm.nb)
 ```
 
 #### With shoot volume
@@ -1303,49 +1235,78 @@ save(bivar4.all.brm.nb,
 
 ```{r}
 summary(bivar4.all.brm.nb) 
-plot(bivar4.all.brm.nb)
-conditional_effects(bivar4.all.brm.nb)
 ```
 
 ## Compare results of MCMCglmm and brms
 
+I am not sure the code for this comparison is correct, the code needs checking! Therefore, I only performed the comparison for models with mean fitness per flowering event and no condition variable so far.
+
 ### Mean fitness per flowering event, no condition variable
-
-# HERE! Modify code below
-
-bivar1.all
-bivar1.all.brm.nb
 
 ```{r}
 kable(data.frame(summary(bivar1.all)$solutions)[1]) # Fixed effects MCMCglmm
 kable(data.frame(summary(bivar1.all.brm.nb)$fixed)[1]) # Fixed effects brms
 
 bivar1.all.brm.nb_asmcmc <- as.mcmc(bivar1.all.brm.nb, combine_chains = TRUE)
-#head(univar.FFD.all.brm_asmcmc) # check which column the parameters are in
+#head(bivar1.all.brm.nb_asmcmc) # check which column the parameters are in
 
-univar.FFD.all.brm_year <- (univar.FFD.all.brm_asmcmc[,4]^2)  
+bivar1.all.brm.nb_year <- (bivar1.all.brm.nb_asmcmc[,7]^2)  
 # sd_year__Intercept^2
-univar.FFD.all.brm_id_intercept <- (univar.FFD.all.brm_asmcmc[,3]^2)  
-# sd_id__Intercept^2 (individual intercept)
-univar.FFD.all.brm_resid <- (univar.FFD.all.brm_asmcmc[,5]^2) 
-# sigma^2 (residual)
 
-kable(rbind(MCMCglmm=summary(univar.FFD.all$VCV)$statistics[,1],
-      brms=as.vector(cbind(mean(univar.FFD.all.brm_year),
-                           mean(univar.FFD.all.brm_id_intercept),
-            mean(univar.FFD.all.brm_resid))))) # Comparison random effects
+bivar1.all.brm.nb_id_intercept_FFD <- (bivar1.all.brm.nb_asmcmc[,5]^2)  
+# sd(FFD_Intercept)^2 (individual intercept for FFD)
 
-# Calculate 95% CI interval of the converted values
-# round(HPDinterval(univar.FFD.all.brm_id_intercept), 2)
-# round(HPDinterval(univar.FFD.all.brm_year), 2)
-# round(HPDinterval(univar.FFD.all.brm_resid), 2)
+bivar1.all.brm.nb_cor_intercept_slope<-(bivar1.all.brm.nb_asmcmc[,10]^2) 
+# cor(FFD_Intercept,FFD_cmean_4)^2 (corr intercept for FFD - slope for FFD)
+
+bivar1.all.brm.nb_cor_intercept_fitness<-(bivar1.all.brm.nb_asmcmc[,8]^2) 
+# cor(roundmeanfitnessfl_Intercept,FFD_Intercept)^2 (corr intercept FFD - fitness)
+
+# cor(FFD_Intercept,FFD_cmean_4)^2 (corr intercept for FFD - slope for FFD) (rep)
+
+bivar1.all.brm.nb_id_slope_FFD <- (bivar1.all.brm.nb_asmcmc[,6]^2)  
+# sd(FFD_cmean_4)^2 (individual slope for FFD)
+
+bivar1.all.brm.nb_cor_slope_fitness<-(bivar1.all.brm.nb_asmcmc[,9]^2) 
+# cor(roundmeanfitnessfl_Intercept,FFD_cmean_4)^2 (corr slope for FFD - fitness)
+
+# cor(roundmeanfitnessfl_Intercept,FFD_Intercept)^2 (corr intercept for FFD - fitness) (rep)
+
+# cor(roundmeanfitnessfl_Intercept,FFD_cmean_4)^2 (corr slope for FFD - fitness) (rep)
+
+bivar1.all.brm.nb_intercept_fitness<-(bivar1.all.brm.nb_asmcmc[,4]^2) 
+# sd(roundmeanfitnessfl_Intercept)^2 (intercept for fitness)
+
+bivar1.all.brm.nb_resid<-(bivar1.all.brm.nb_asmcmc[,12]^2) 
+# sigma_FFD^2 (residual)
+
+compar_bivar1<-cbind(MCMCglmm=summary(bivar1.all$VCV)$statistics[,1],
+      brms=as.vector(cbind(mean(bivar1.all.brm.nb_year),
+                           mean(bivar1.all.brm.nb_id_intercept_FFD),
+                           mean(bivar1.all.brm.nb_cor_intercept_slope),
+                           -mean(bivar1.all.brm.nb_cor_intercept_fitness),
+                           mean(bivar1.all.brm.nb_cor_intercept_slope),
+                           mean(bivar1.all.brm.nb_id_slope_FFD),
+                           -mean(bivar1.all.brm.nb_cor_slope_fitness),
+                           -mean(bivar1.all.brm.nb_cor_intercept_fitness),
+                           -mean(bivar1.all.brm.nb_cor_slope_fitness),
+                           mean(bivar1.all.brm.nb_intercept_fitness),
+                           mean(bivar1.all.brm.nb_resid))))
+# Comparison random effects
+compar_bivar1<-compar_bivar1[c(1:4,6:7,10:11),]
+row.names(compar_bivar1)<-c("year_FFD",
+                          "id_var_intercept_FFD",
+                          "id_covar_intercept_slope_FFD",
+                          "id_covar_fitness_intercept_FFD",
+                          "id_var_slope_FFD",
+                          "id_covar_fitness_slope_FFD",
+                          "id_var_intercept_fitness",
+                          "residual")
+kable(compar_bivar1)
 ```
+
+TO DO: run again the analyses with the BLUPs to test for variation in selection among years with all the individuals
 
 ```{r include=FALSE}
 sessionInfo()
 ```
-
-
-
-
-
