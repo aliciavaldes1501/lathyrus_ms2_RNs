@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .Rproj.user
 .Rhistory
 .RData
@@ -6,3 +7,15 @@ output
 docs
 functions
 data
+=======
+data
+docs
+other
+output
+.Rproj.user
+.Rproj
+.RData
+.Rhistory
+.Rapp.history
+.pdf
+>>>>>>> a475ed2748e8a61e94daecf2854317bb5e8dab6c
