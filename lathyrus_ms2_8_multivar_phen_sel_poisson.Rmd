@@ -1,0 +1,1457 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 3 (Arnold et al. 2019 Phil. Trans. R. Soc. B)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/code/mean_weather_aprilmay.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Arnold et al. 2019 Phil. Trans. R. Soc. B. 
+
+Fitting bivariate models of fitness and FFD, with random regressions for individuals, using a Poisson distribution for fitness, instead of Gaussian (and absolute instead of relative fitness). Using either total fitness or mean fitness per flowering event. Trying different alternatives for temperature (mean April, mean May, min April, mean April-May). Trying also to include number of flowers.
+
+# Using ids with 4 years of data
+
+## Total fitness
+
+### Temperature: mean April
+
+#### Without number of flowers
+
+Stack data:
+
+The bivariate MCMCglmm models with covariances between fitness and FFD intercepts and slopes are run using a stacked data set. We therefore need to first stack our data and add in index columns of 'traits', 'variable', and 'family', which are all required for MCMCglmm to fit a multivariate model of traits with different distributions. The values of the two variables need to be stacked into a single column and identified as either 'fitness' or 'FFD' with an index column. Likewise, the 'family' index column tells MCMCglmm what distribution family that response variable follows (here, Poisson or Gaussian). For this data-set, we put the fitness data first, then the repeated-measures FFD data.
+
+```{r stack data 1}
+# Create a single data-set "data.stack_pois", with single column at start to index observations
+data.stack_pois <- c()
+data.stack_pois$Obs <- 1:(243 + 1455)
+data.stack_pois$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data_4yrs_total_wfirstyr<-data_4yrs_total%>%
+  right_join(data_4yrs[c(3,10)]%>%
+               group_by(id)%>%
+               summarise(first_yr=mean(first_yr)),by="id")
+
+data.stack_pois$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois$temp <- c(rep(0, 243), data_4yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois$variable <- data.stack_pois$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois <- data.frame(data.stack_pois)
+
+data.stack_pois$id <- as.factor(data.stack_pois$id)
+data.stack_pois$year <- as.factor(data.stack_pois$year)
+head(data.stack_pois)
+```
+
+```{r MCMCglmm models 1}
+# Scaling factor for MCMCglmm iterations
+sc <- 100#0 # Increase this parameter for longer runs
+
+priorBiv_RR_pois <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE),  
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR_pois <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 2}
+kable(summary(modelBV_RR_pois)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 3}
+kable(summary(modelBV_RR_pois)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 4}
+kable(summary(modelBV_RR_pois)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+Meaning of each row: "Among-id var in intercept for FFD", "Among-id covar between intercept and slope for FFD", "Among-individual covar between fitness and var in intercepts for FFD", "Among-id covar between intercept and slope for FFD", "Among-id var in slope for FFD", "Among-id covar between slope for FFD and intercept for fitness", "Among-individual covar between fitness and var in intercepts for FFD", "Among-id covar between slope for FFD and intercept for fitness", "Among-id var in intercept for fitness", "Within-id var in FFD between years".
+
+```{r MCMCglmm models 5, fig.height=10, fig.width=8}
+plot(modelBV_RR_pois$VCV[,1:4])
+plot(modelBV_RR_pois$VCV[,5:8])
+plot(modelBV_RR_pois$VCV[,9:11])
+```
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r MCMCglmm models 6}
+kable(diag(autocorr(modelBV_RR_pois$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Ensure that the among-individual correlation between intercepts and slopes for FFD is (approximately) the same as we estimated in our earlier univariate random regression model. 
+
+```{r MCMCglmm models 7, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_intslope <- 
+  modelBV_RR_pois$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_intslope)
+posterior.mode(cor_BV_RR_pois_intslope)
+HPDinterval(cor_BV_RR_pois_intslope) 
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). Although it is a bit lower than in our earlier univariate random regression model (OK?).
+
+Determining the among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 8, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_intfit <-
+  modelBV_RR_pois$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_pois_intfit)
+posterior.mode(cor_BV_RR_pois_intfit)
+HPDinterval(cor_BV_RR_pois_intfit)
+```
+
+Negative correlation: Fitness increases when FFD decreases (i.e. is earlier).
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 9, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_slopefit <- 
+  modelBV_RR_pois$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_slopefit)
+posterior.mode(cor_BV_RR_pois_slopefit)
+HPDinterval(cor_BV_RR_pois_slopefit)
+```
+
+Negative correlation: Fitness increases when the slope for FFD decreases (i.e. is more negative, and therefore plasticity increases). Fitness is higher in more plastic individuals. However, this correlation is not significant because the CIs encompass zero!!!
+
+##### Extract selection coefficients
+
+Selection differentials or gradients should be calculated using relative fitness, and models are typically fitted assuming Gaussian errors. However, where the fitness measure follows a non-Gaussian distribution, as is typically the case with skewed distributions of fitness, a GLMM of absolute fitness will be preferable. The resulting covariances returned by the model will then be between the trait on the data scale and fitness on a ‘latent’ (link-function) scale. These estimates need to be transformed if data-scale estimates of selection are required. However, in the case of a GLMM with a log-link function (e.g. Poisson, over-dispersed Poisson, or negative binomial distribution), it is possible to exploit the fact that the latent-scale covariance with absolute fitness is equivalent to the data-scale covariance of relative fitness: consequently, and conveniently, the covariance components of Pind on the latent scale can simply be treated as selection differentials S. By extension, estimates of b as indicated above will also provide data-scale selection gradients.
+
+```{r selcoefs 1, fig.height=3.5, fig.width=8}
+# Extract 3x3 matrix of variance-covariance values for intercepts and slopes of X, and LBS 
+# These are in the 2nd-10th columns of model output
+P.modelBV_RR_pois <- modelBV_RR_pois$VCV[,2:10]         
+P.modelBV_RR_pois.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR_pois.mode[k] <- posterior.mode(P.modelBV_RR_pois[,k])
+P.modelBV_RR_pois.mode
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR_pois <- modelBV_RR_pois$VCV[, c(4,7)]
+S.modelBV_RR_pois <- P.modelBV_RR_pois[, c(3,6)]
+colnames(S.modelBV_RR_pois) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR_pois.mode <- P.modelBV_RR_pois.mode[1:2, 3]
+S.modelBV_RR_pois.mode
+posterior.mode(mcmc(S.modelBV_RR_pois))
+HPDinterval(mcmc(S.modelBV_RR_pois))
+
+# Plot posterior distribution of selection differentials
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR_pois[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR_pois[,2]), main = "S_slopes")
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+n <- length(modelBV_RR_pois$VCV[,2])   # sample size
+beta_post_RR_pois <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR_pois[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR_pois[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+# Finally, extract and plot the selection gradients posterior modes 
+# and 95% credible intervals for both selection on intercepts (trait value) 
+# and slopes (trait plasticity).
+# Note that credible intervals are not exactly confidence intervals. See here:
+# https://statsdirect.com/help/basics/confidence_interval.htm and
+# https://stats.stackexchange.com/questions/2272/
+
+colnames(beta_post_RR_pois) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR_pois))
+HPDinterval(mcmc(beta_post_RR_pois))
+
+# Plot posterior distribution of selection gradients
+par(mfrow = c(1,2))
+plot(density(beta_post_RR_pois[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR_pois[,2]), main = "beta_slopes")
+
+# NB selection differentials and gradients here are from covariances with latent-scale absolute fitness
+# These are equivalent to covariances with data-scale relative fitness: see main text of paper
+```
+
+#### With number of flowers
+
+Stack data:
+
+```{r stack data 2}
+# Create a single data-set "data.stack_pois_nfl",
+# with single column at start to index observations
+data.stack_pois_nfl <- c()
+data.stack_pois_nfl$Obs <- 1:(243 + 1455)
+data.stack_pois_nfl$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data.stack_pois_nfl$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_nfl$temp <- c(rep(0, 243), data_4yrs$cmean_4)
+
+# Number of flowers column is only relevant for FFD, but is set to 0 for fitness values
+data_4yrs$cn_fl<-scale(data_4yrs$n_fl,center=T,scale=F) # Standardize number of flowers
+data.stack_pois_nfl$n_fl <- c(rep(0, 243), data_4yrs$cn_fl)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_nfl$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_nfl$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois_nfl$variable <- data.stack_pois_nfl$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_nfl$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois_nfl <- data.frame(data.stack_pois_nfl)
+
+data.stack_pois_nfl$id <- as.factor(data.stack_pois_nfl$id)
+data.stack_pois_nfl$year <- as.factor(data.stack_pois_nfl$year)
+head(data.stack_pois_nfl)
+```
+
+```{r MCMCglmm models 10}
+modelBV_RR_pois_nfl <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp +  # single fixed effect of temp 
+                           at.level(variable, "FFD"):n_fl, # single fixed effect of n_fl 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_nfl,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD (we only focus in this result in this and the following models, to see if it reaches significance with any of the combinations): 
+
+```{r MCMCglmm models 11, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_nfl_slopefit <- 
+  modelBV_RR_pois_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_nfl$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_nfl_slopefit)
+posterior.mode(cor_BV_RR_pois_nfl_slopefit)
+HPDinterval(cor_BV_RR_pois_nfl_slopefit)
+```
+
+### Temperature: mean May
+
+Mean-centred mean May temperature:
+
+```{r May temp}
+data_4yrs<-data_4yrs%>%
+  mutate(cmean_5=scale(mean_5,center=T,scale=F))
+```
+
+Stack data:
+
+```{r stack data 3}
+# Create a single data-set "data.stack_pois_may", with single column at start to index observations
+data.stack_pois_may <- c()
+data.stack_pois_may$Obs <- 1:(243 + 1455)
+data.stack_pois_may$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois_may$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_may$temp <- c(rep(0, 243), data_4yrs$cmean_5)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_may$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_may$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois_may$variable <- data.stack_pois_may$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_may$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois_may <- data.frame(data.stack_pois_may)
+
+data.stack_pois_may$id <- as.factor(data.stack_pois_may$id)
+data.stack_pois_may$year <- as.factor(data.stack_pois_may$year)
+head(data.stack_pois_may)
+```
+
+```{r MCMCglmm models 12}
+modelBV_RR_pois_may <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_may,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 13, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_may_slopefit <- 
+  modelBV_RR_pois_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_may$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_may_slopefit)
+posterior.mode(cor_BV_RR_pois_may_slopefit)
+HPDinterval(cor_BV_RR_pois_may_slopefit)
+```
+
+### Temperature: min April
+
+Mean-centred min April temperature:
+
+```{r min April temp}
+data_4yrs<-data_4yrs%>%
+  mutate(cmin_4=scale(min_4,center=T,scale=F))
+```
+
+Stack data:
+
+```{r stack data 4}
+# Create a single data-set "data.stack_pois_min", with single column at start to index observations
+data.stack_pois_min <- c()
+data.stack_pois_min$Obs <- 1:(243 + 1455)
+data.stack_pois_min$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois_min$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_min$temp <- c(rep(0, 243), data_4yrs$cmin_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_min$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_min$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois_min$variable <- data.stack_pois_min$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_min$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois_min <- data.frame(data.stack_pois_min)
+
+data.stack_pois_min$id <- as.factor(data.stack_pois_min$id)
+data.stack_pois_min$year <- as.factor(data.stack_pois_min$year)
+head(data.stack_pois_may)
+```
+
+```{r MCMCglmm models 14}
+modelBV_RR_pois_min <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_min,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 15, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_min_slopefit <- 
+  modelBV_RR_pois_min$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_min$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_min$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_min_slopefit)
+posterior.mode(cor_BV_RR_pois_min_slopefit)
+HPDinterval(cor_BV_RR_pois_min_slopefit)
+```
+
+### Temperature: mean April-May
+
+Add April-May temperatures:
+
+```{r April-May temp}
+mean_weather_aprilmay$year<-as.integer(as.character(mean_weather_aprilmay$year))
+data_4yrs<-data_4yrs%>%
+  right_join(unique(mean_weather_aprilmay),by="year")%>%
+  mutate(cmean_45=scale(mean_45,center=T,scale=F))
+```
+
+Stack data:
+
+```{r stack data 5}
+# Create a single data-set "data.stack_pois_aprilmay",
+# with single column at start to index observations
+data.stack_pois_aprilmay <- c()
+data.stack_pois_aprilmay$Obs <- 1:(243 + 1455)
+data.stack_pois_aprilmay$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois_aprilmay$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_aprilmay$temp <- c(rep(0, 243), data_4yrs$cmean_45)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_aprilmay$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_aprilmay$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois_aprilmay$variable <- data.stack_pois_aprilmay$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_aprilmay$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois_aprilmay <- data.frame(data.stack_pois_aprilmay)
+
+data.stack_pois_aprilmay$id <- as.factor(data.stack_pois_aprilmay$id)
+data.stack_pois_aprilmay$year <- as.factor(data.stack_pois_aprilmay$year)
+head(data.stack_pois_aprilmay)
+```
+
+```{r MCMCglmm models 16}
+modelBV_RR_pois_aprilmay <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_aprilmay,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 17, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_aprilmay_slopefit <- 
+  modelBV_RR_pois_aprilmay$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_aprilmay$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_aprilmay$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_aprilmay_slopefit)
+posterior.mode(cor_BV_RR_pois_aprilmay_slopefit)
+HPDinterval(cor_BV_RR_pois_aprilmay_slopefit)
+```
+
+## Mean fitness per flowering event
+
+Using mean fitness per flowering event (sum of fitness divided by number of years when the plant flowered), instead of mean fitness over all years.  
+
+```{r fitness calc}
+data_4yrs_total<-data_4yrs_total%>%
+  right_join(data_4yrs %>%
+               group_by(id)%>%
+               summarise(n_years=n(),mean_fitness_fl=sum(n_intact_seeds)/mean(n_years))%>%
+               select(id,mean_fitness_fl),by="id")
+```
+
+### Temperature: mean April
+
+#### Without number of flowers
+
+Stack data:
+
+```{r stack data 6}
+# Create a single data-set "data.stack_pois2", with single column at start to index observations
+data.stack_pois2 <- c()
+data.stack_pois2$Obs <- 1:(243 + 1455)
+data.stack_pois2$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2$temp <- c(rep(0, 243), data_4yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness_fl), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois2$variable <- data.stack_pois2$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois2 <- data.frame(data.stack_pois2)
+
+data.stack_pois$id <- as.factor(data.stack_pois$id)
+data.stack_pois$year <- as.factor(data.stack_pois$year)
+head(data.stack_pois)
+```
+
+```{r MCMCglmm models 18}
+modelBV_RR_pois2 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 19, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_slopefit <- 
+  modelBV_RR_pois2$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_slopefit)
+posterior.mode(cor_BV_RR_pois2_slopefit)
+HPDinterval(cor_BV_RR_pois2_slopefit)
+```
+
+#### With number of flowers
+
+Stack data:
+
+```{r stack data 7}
+# Create a single data-set "data.stack_pois2_nfl",
+# with single column at start to index observations
+data.stack_pois2_nfl <- c()
+data.stack_pois2_nfl$Obs <- 1:(243 + 1455)
+data.stack_pois2_nfl$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_nfl$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_nfl$temp <- c(rep(0, 243), data_4yrs$cmean_4)
+
+# Number of flowers column is only relevant for FFD, but is set to 0 for fitness values
+data_4yrs$cn_fl<-scale(data_4yrs$n_fl,center=T,scale=F) # Standardize number of flowers
+data.stack_pois2_nfl$n_fl <- c(rep(0, 243), data_4yrs$cn_fl)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_nfl$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness_fl), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_nfl$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois2_nfl$variable <- data.stack_pois_nfl$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_nfl$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois2_nfl <- data.frame(data.stack_pois2_nfl)
+
+data.stack_pois2_nfl$id <- as.factor(data.stack_pois2_nfl$id)
+data.stack_pois2_nfl$year <- as.factor(data.stack_pois2_nfl$year)
+head(data.stack_pois2_nfl)
+```
+
+```{r MCMCglmm models 20}
+modelBV_RR_pois2_nfl <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp +  # single fixed effect of temp 
+                           at.level(variable, "FFD"):n_fl, # single fixed effect of n_fl 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_nfl,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 21, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_nfl_slopefit <- 
+  modelBV_RR_pois2_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_nfl$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_nfl_slopefit)
+posterior.mode(cor_BV_RR_pois2_nfl_slopefit)
+HPDinterval(cor_BV_RR_pois2_nfl_slopefit)
+```
+
+### Temperature: mean May
+
+Stack data:
+
+```{r stack data 8}
+# Create a single data-set "data.stack_pois2_may", with single column at start to index observations
+data.stack_pois2_may <- c()
+data.stack_pois2_may$Obs <- 1:(243 + 1455)
+data.stack_pois2_may$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_may$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_may$temp <- c(rep(0, 243), data_4yrs$cmean_5)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_may$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness_fl), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_may$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois2_may$variable <- data.stack_pois2_may$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_may$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois2_may <- data.frame(data.stack_pois2_may)
+
+data.stack_pois2_may$id <- as.factor(data.stack_pois2_may$id)
+data.stack_pois2_may$year <- as.factor(data.stack_pois2_may$year)
+head(data.stack_pois2_may)
+```
+
+```{r MCMCglmm models 22}
+modelBV_RR_pois2_may <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_may,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 23, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_may_slopefit <- 
+  modelBV_RR_pois2_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_may$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_may_slopefit)
+posterior.mode(cor_BV_RR_pois2_may_slopefit)
+HPDinterval(cor_BV_RR_pois2_may_slopefit)
+```
+
+### Temperature: min April
+
+Stack data:
+
+```{r stack data 9}
+# Create a single data-set "data.stack_pois2_min", with single column at start to index observations
+data.stack_pois2_min <- c()
+data.stack_pois2_min$Obs <- 1:(243 + 1455)
+data.stack_pois2_min$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_min$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_min$temp <- c(rep(0, 243), data_4yrs$cmin_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_min$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness_fl), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_min$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois2_min$variable <- data.stack_pois2_min$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_min$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois2_min <- data.frame(data.stack_pois2_min)
+
+data.stack_pois2_min$id <- as.factor(data.stack_pois2_min$id)
+data.stack_pois2_min$year <- as.factor(data.stack_pois2_min$year)
+head(data.stack_pois2_min)
+```
+
+```{r MCMCglmm models 24}
+modelBV_RR_pois2_min <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_min,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 25, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_min_slopefit <- 
+  modelBV_RR_pois2_min$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_min$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_min$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_min_slopefit)
+posterior.mode(cor_BV_RR_pois2_min_slopefit)
+HPDinterval(cor_BV_RR_pois2_min_slopefit)
+```
+
+### Temperature: mean April-May
+
+Stack data:
+
+```{r stack data 10}
+# Create a single data-set "data.stack_pois2_aprilmay",
+# with single column at start to index observations
+data.stack_pois2_aprilmay <- c()
+data.stack_pois2_aprilmay$Obs <- 1:(243 + 1455)
+data.stack_pois2_aprilmay$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_aprilmay$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_aprilmay$temp <- c(rep(0, 243), data_4yrs$cmean_45)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_aprilmay$fitness.FFD.stack <- c(round(data_4yrs_total$mean_fitness_fl), data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_aprilmay$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack_pois2_aprilmay$variable <- data.stack_pois2_aprilmay$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_aprilmay$family <- c(rep("poisson", 243), rep("gaussian", 1455))
+data.stack_pois2_aprilmay <- data.frame(data.stack_pois2_aprilmay)
+
+data.stack_pois2_aprilmay$id <- as.factor(data.stack_pois2_aprilmay$id)
+data.stack_pois2_aprilmay$year <- as.factor(data.stack_pois2_aprilmay$year)
+head(data.stack_pois2_aprilmay)
+```
+
+```{r MCMCglmm models 26}
+modelBV_RR_pois2_aprilmay <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_aprilmay,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 27, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_aprilmay_slopefit <- 
+  modelBV_RR_pois2_aprilmay$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_aprilmay$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_aprilmay$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_aprilmay_slopefit)
+posterior.mode(cor_BV_RR_pois2_aprilmay_slopefit)
+HPDinterval(cor_BV_RR_pois2_aprilmay_slopefit)
+```
+
+## Summary 4 years
+
+Among-individual correlation between fitness and variation in slopes for FFD for each model:
+
+```{r cor_slopefit}
+cor_slopefit<-rbind(cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_nfl_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_nfl_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_may_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_may_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_min_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_min_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_aprilmay_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_aprilmay_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_nfl_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_nfl_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_may_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_may_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_min_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_min_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_aprilmay_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_aprilmay_slopefit)[,1:2])))
+row.names(cor_slopefit)<-c("Total fitness, mean April temperature, without n_fl",
+                           "Total fitness, mean April temperature, with n_fl",
+                           "Total fitness, mean May temperature",
+                           "Total fitness, min April temperature",
+                           "Total fitness, mean April-May temperature",
+                           "Mean fitness per flowering event, mean April temperature, without n_fl",
+                           "Mean fitness per flowering event, mean April temperature, with n_fl",
+                           "Mean fitness per flowering event, mean May temperature",
+                           "Mean fitness per flowering event, min April temperature",
+                           "Mean fitness per flowering event, mean April-May temperature")
+kable(cor_slopefit,digits=3)
+```
+
+# Using ids with 5 years of data
+
+All models without number of flowers.
+
+## Total fitness
+
+### Temperature: mean April
+
+#### Without number of flowers
+
+```{r stack data 11}
+# Create a single data-set "data.stack_pois_5", with single column at start to index observations
+data.stack_pois_5 <- c()
+data.stack_pois_5$Obs <- 1:(156 + 1107)
+data.stack_pois_5$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data_5yrs_total_wfirstyr<-data_5yrs_total%>%
+  right_join(data_5yrs[c(3,10)]%>%
+               group_by(id)%>%
+               summarise(first_yr=mean(first_yr)),by="id")
+
+data.stack_pois_5$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_5$temp <- c(rep(0, 156), data_5yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_5$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_5$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack_pois_5$variable <- data.stack_pois_5$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_5$family <- c(rep("poisson", 156), rep("gaussian", 1107))
+data.stack_pois_5 <- data.frame(data.stack_pois_5)
+
+data.stack_pois_5$id <- as.factor(data.stack_pois_5$id)
+data.stack_pois_5$year <- as.factor(data.stack_pois_5$year)
+head(data.stack_pois_5)
+```
+
+```{r MCMCglmm models 28}
+modelBV_RR_pois_5 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_5,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 29, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_slopefit <- 
+  modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_5_slopefit)
+posterior.mode(cor_BV_RR_pois_5_slopefit)
+HPDinterval(cor_BV_RR_pois_5_slopefit)
+```
+#### With number of flowers
+
+Stack data:
+
+```{r stack data 12}
+# Create a single data-set "data.stack_pois_5_nfl",
+# with single column at start to index observations
+data.stack_pois_5_nfl <- c()
+data.stack_pois_5_nfl$Obs <- 1:(156 + 1107)
+data.stack_pois_5_nfl$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data.stack_pois_5_nfl$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_5_nfl$temp <- c(rep(0, 156), data_5yrs$cmean_4)
+
+# Number of flowers column is only relevant for FFD, but is set to 0 for fitness values
+data_5yrs$cn_fl<-scale(data_5yrs$n_fl,center=T,scale=F) # Standardize number of flowers
+data.stack_pois_5_nfl$n_fl <- c(rep(0, 156), data_5yrs$cn_fl)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_5_nfl$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_5_nfl$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack_pois_5_nfl$variable <- data.stack_pois_5_nfl$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_5_nfl$family <- c(rep("poisson", 156), rep("gaussian", 1107))
+data.stack_pois_5_nfl <- data.frame(data.stack_pois_5_nfl)
+
+data.stack_pois_5_nfl$id <- as.factor(data.stack_pois_5_nfl$id)
+data.stack_pois_5_nfl$year <- as.factor(data.stack_pois_5_nfl$year)
+head(data.stack_pois_5_nfl)
+```
+
+```{r MCMCglmm models 30}
+modelBV_RR_pois_5_nfl <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp +  # single fixed effect of temp 
+                           at.level(variable, "FFD"):n_fl, # single fixed effect of n_fl 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_5_nfl,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 31, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_nfl_slopefit <- 
+  modelBV_RR_pois_5_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_5_nfl$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_5_nfl$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_5_nfl_slopefit)
+posterior.mode(cor_BV_RR_pois_5_nfl_slopefit)
+HPDinterval(cor_BV_RR_pois_5_nfl_slopefit)
+```
+
+### Temperature: mean May
+
+Mean-centred mean May temperature:
+
+```{r May temp 5}
+data_5yrs<-data_5yrs%>%
+  mutate(cmean_5=scale(mean_5,center=T,scale=F))
+```
+
+Stack data:
+
+```{r stack data 13}
+# Create a single data-set "data.stack_pois_5_may", with single column at start to index observations
+data.stack_pois_5_may <- c()
+data.stack_pois_5_may$Obs <- 1:(156 + 1107)
+data.stack_pois_5_may$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois_5_may$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois_5_may$temp <- c(rep(0, 156), data_5yrs$cmean_5)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois_5_may$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois_5_may$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack_pois_5_may$variable <- data.stack_pois_5_may$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois_5_may$family <- c(rep("poisson", 156), rep("gaussian", 1107))
+data.stack_pois_5_may <- data.frame(data.stack_pois_5_may)
+
+data.stack_pois_5_may$id <- as.factor(data.stack_pois_5_may$id)
+data.stack_pois_5_may$year <- as.factor(data.stack_pois_5_may$year)
+head(data.stack_pois_5_may)
+```
+
+```{r MCMCglmm models 32}
+modelBV_RR_pois_5_may <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois_5_may,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 33, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_may_slopefit <- 
+  modelBV_RR_pois_5_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_5_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_5_may$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_5_may_slopefit)
+posterior.mode(cor_BV_RR_pois_5_may_slopefit)
+HPDinterval(cor_BV_RR_pois_5_may_slopefit)
+```
+
+## Mean fitness per flowering event
+
+```{r fitness calc 5}
+data_5yrs_total<-data_5yrs_total%>%
+  right_join(data_5yrs %>%
+               group_by(id)%>%
+               summarise(n_years=n(),mean_fitness_fl=sum(n_intact_seeds)/mean(n_years))%>%
+               select(id,mean_fitness_fl),by="id")
+```
+
+### Temperature: mean April
+
+Stack data:
+
+```{r stack data 14}
+# Create a single data-set "data.stack_pois2_5", with single column at start to index observations
+data.stack_pois2_5 <- c()
+data.stack_pois2_5$Obs <- 1:(156 + 1107)
+data.stack_pois2_5$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_5$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_5$temp <- c(rep(0, 156), data_5yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_5$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_fl), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_5$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack_pois2_5$variable <- data.stack_pois2_5$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_5$family <- c(rep("poisson", 156), rep("gaussian", 1107))
+data.stack_pois2_5 <- data.frame(data.stack_pois2_5)
+
+data.stack_pois2_5$id <- as.factor(data.stack_pois2_5$id)
+data.stack_pois2_5$year <- as.factor(data.stack_pois2_5$year)
+head(data.stack_pois2_5)
+```
+
+```{r MCMCglmm models 34}
+modelBV_RR_pois2_5 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_5,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 35, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_5_slopefit <- 
+  modelBV_RR_pois2_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_5_slopefit)
+posterior.mode(cor_BV_RR_pois2_5_slopefit)
+HPDinterval(cor_BV_RR_pois2_5_slopefit)
+```
+
+### Temperature: mean May
+
+Stack data:
+
+```{r stack data 15}
+# Create a single data-set "data.stack_pois2_5_may", with single column at start to index observations
+data.stack_pois2_5_may <- c()
+data.stack_pois2_5_may$Obs <- 1:(156 + 1107)
+data.stack_pois2_5_may$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack_pois2_5_may$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack_pois2_5_may$temp <- c(rep(0, 156), data_5yrs$cmean_5)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack_pois2_5_may$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_fl), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack_pois2_5_may$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack_pois2_5_may$variable <- data.stack_pois2_5_may$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack_pois2_5_may$family <- c(rep("poisson", 156), rep("gaussian", 1107))
+data.stack_pois2_5_may <- data.frame(data.stack_pois2_5_may)
+
+data.stack_pois2_5_may$id <- as.factor(data.stack_pois2_5_may$id)
+data.stack_pois2_5_may$year <- as.factor(data.stack_pois2_5_may$year)
+head(data.stack_pois2_5_may)
+```
+
+```{r MCMCglmm models 36}
+modelBV_RR_pois2_5_may <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack_pois2_5_may,
+                       prior = priorBiv_RR_pois, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 37, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois2_5_may_slopefit <- 
+  modelBV_RR_pois2_5_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois2_5_may$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois2_5_may$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois2_5_may_slopefit)
+posterior.mode(cor_BV_RR_pois2_5_may_slopefit)
+HPDinterval(cor_BV_RR_pois2_5_may_slopefit)
+```
+
+## Summary 5 years
+
+Among-individual correlation between fitness and variation in slopes for FFD for each model:
+
+```{r cor_slopefit 5}
+cor_slopefit_5<-rbind(cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_5_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_5_slopefit)[,1:2])),
+                      cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_5_nfl_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_5_nfl_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois_5_may_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois_5_may_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_5_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_5_slopefit)[,1:2])),
+                    cbind(posterior.mode=posterior.mode(cor_BV_RR_pois2_5_may_slopefit),
+                          rbind(HPDinterval(cor_BV_RR_pois2_5_may_slopefit)[,1:2])))
+row.names(cor_slopefit_5)<-c("Total fitness, mean April temperature, without n_fl",
+                             "Total fitness, mean April temperature, with n_fl",
+                           "Total fitness, mean May temperature",
+                           "Mean fitness per flowering event, mean April temperature",
+                           "Mean fitness per flowering event, mean May temperature")
+kable(cor_slopefit_5,digits=3)
+```
+
+# Only model with selection on RN slope: modelBV_RR_pois_5
+
+```{r MCMCglmm models 38}
+kable(summary(modelBV_RR_pois_5)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 39}
+kable(summary(modelBV_RR_pois_5)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 40}
+kable(summary(modelBV_RR_pois_5)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 41}
+kable(diag(autocorr(modelBV_RR_pois_5$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 42, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_intslope <- 
+  modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_5_intslope)
+posterior.mode(cor_BV_RR_pois_5_intslope)
+HPDinterval(cor_BV_RR_pois_5_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 43, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_intfit <-
+  modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_pois_5_intfit)
+posterior.mode(cor_BV_RR_pois_5_intfit)
+HPDinterval(cor_BV_RR_pois_5_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 44, fig.height=3.5, fig.width=8}
+cor_BV_RR_pois_5_slopefit <- 
+  modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_pois_5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_pois_5_slopefit)
+posterior.mode(cor_BV_RR_pois_5_slopefit)
+HPDinterval(cor_BV_RR_pois_5_slopefit)
+```
+
+##### Extract selection coefficients
+
+```{r selcoefs 2, fig.height=3.5, fig.width=8}
+# Extract 3x3 matrix of variance-covariance values for intercepts and slopes of X, and LBS 
+# These are in the 2nd-10th columns of model output
+P.modelBV_RR_pois_5 <- modelBV_RR_pois_5$VCV[,2:10]         
+P.modelBV_RR_pois_5.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR_pois_5.mode[k] <- posterior.mode(P.modelBV_RR_pois_5[,k])
+P.modelBV_RR_pois_5.mode
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR_pois_5 <- modelBV_RR_pois_5$VCV[, c(4,7)]
+S.modelBV_RR_pois_5 <- P.modelBV_RR_pois_5[, c(3,6)]
+colnames(S.modelBV_RR_pois_5) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR_pois_5.mode <- P.modelBV_RR_pois_5.mode[1:2, 3]
+S.modelBV_RR_pois_5.mode
+posterior.mode(mcmc(S.modelBV_RR_pois_5))
+HPDinterval(mcmc(S.modelBV_RR_pois_5))
+
+# Plot posterior distribution of selection differentials
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR_pois_5[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR_pois_5[,2]), main = "S_slopes")
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+n <- length(modelBV_RR_pois_5$VCV[,2])   # sample size
+beta_post_RR_pois_5 <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR_pois_5[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR_pois_5[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+# Finally, extract and plot the selection gradients posterior modes 
+# and 95% credible intervals for both selection on intercepts (trait value) 
+# and slopes (trait plasticity).
+# Note that credible intervals are not exactly confidence intervals. See here:
+# https://statsdirect.com/help/basics/confidence_interval.htm and
+# https://stats.stackexchange.com/questions/2272/
+
+colnames(beta_post_RR_pois_5) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR_pois_5))
+HPDinterval(mcmc(beta_post_RR_pois_5))
+
+# Plot posterior distribution of selection gradients
+par(mfrow = c(1,2))
+plot(density(beta_post_RR_pois_5[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR_pois_5[,2]), main = "beta_slopes")
+
+# NB selection differentials and gradients here are from covariances with latent-scale absolute fitness
+# These are equivalent to covariances with data-scale relative fitness: see main text of paper
+```
+
+```{r save data, include=FALSE}
+save(data_4yrs, file="data_4yrs5.RData")
+save(data_4yrs_total, file="data_4yrs_total2.RData")
+save(data_5yrs, file="data_5yrs5.RData")
+save(data_5yrs_total, file="data_5yrs_total2.RData")
+```
+
+

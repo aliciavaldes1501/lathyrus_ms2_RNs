@@ -1,0 +1,106 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 4 (Arnold et al. 2019 Phil. Trans. R. Soc. B)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs5.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total2.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs5.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total2.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Repeating some models using within-subject centering (van de Pol & Wright 2009).
+
+Within-subject centering of mean April temperature: We substract the id's mean value from each observation value, deriving a new predictor variable (cmean_4_ws) to use as a fixed effect that expresses only the within-subject (within-id) variation component. We then need to derive a second new fixed predictor variable (cmean_4_bs) to express only the between-subject (between-id) variation component, and this is simply the ids’ means.
+
+```{r ws centering}
+data_4yrs<-data_4yrs%>%
+  group_by(id)%>%
+  mutate(cmean_4_ws=mean_4-mean(mean_4),cmean_4_bs=mean(mean_4))
+data_5yrs<-data_5yrs%>%
+  group_by(id)%>%
+  mutate(cmean_4_ws=mean_4-mean(mean_4),cmean_4_bs=mean(mean_4))
+```
+
+# Ids with 4 years of data, mean April temperature
+
+```{r MCMCglmm models 1, warning=FALSE, message=FALSE}
+# Scaling factor for MCMCglmm iterations
+sc <- 100#0 # Increase this parameter for longer runs
+
+priorUV2_RR_ws <- list(G = list(G1 = list(V = diag(1), nu = 1),  # other random effect (YEAR)
+                             G2 = list(V = diag(2), nu = 1),
+                             G3 = list(V = diag(2), nu = 1)),  
+                        # ^ 2x2 variance-covariance matrix for var in slopes + intercepts
+                    R = list(R1 = list(V = diag(1), nu = 2)))  
+
+univar.FFD_RR_ws4 <- MCMCglmm(FFD ~ cmean_4_ws + cmean_4_bs,
+                        random = ~year + us(1 + cmean_4_ws):id + us(1 + cmean_4_bs):id,
+                        rcov = ~units,
+                        data = data_4yrs,
+                        prior = priorUV2_RR_ws, 
+                        family = "gaussian",
+                        nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+summary(univar.FFD_RR_ws4)
+```
+
+# Ids with 5 years of data, mean April temperature
+
+```{r MCMCglmm models 2, warning=FALSE, message=FALSE}
+univar.FFD_RR_ws5 <- MCMCglmm(FFD ~ cmean_4_ws + cmean_4_bs,
+                        random = ~year + us(1 + cmean_4_ws):id + us(1 + cmean_4_bs):id,
+                        rcov = ~units,
+                        data = data_5yrs,
+                        prior = priorUV2_RR_ws, 
+                        family = "gaussian",
+                        nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+summary(univar.FFD_RR_ws5)
+```
+
+What I understand from van de Pol & Wright 2009: We tested whether either the within-subject effect (cmean_4_ws) or the between-subject effect (cmean_4_bs) is itself significant. As the parameter estimates of these two effects do not seem to differ, we can say that the within- and between-subject effects are effectively the same.

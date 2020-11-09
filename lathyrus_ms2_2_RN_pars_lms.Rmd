@@ -1,0 +1,108 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - Extraction of RN parameters with lms"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs1.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs1.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs1.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Reaction norm of FFD to mean daily temperature April, using the subset of data with plants with 4 or more years of data
+
+Plot of the 243 reaction norms
+
+```{r plot RNs, echo=FALSE, fig.height=4, fig.width=5}
+ggplot(data_4yrs,aes(x=scale(mean_4,center=T,scale=F),y=FFD,group=id))+
+  geom_smooth(method=lm,se=F,color="black",size=0.05)+
+  xlab("Mean.centred mean daily temperature April")+
+  ylab("First flowering date")+my_theme()
+```
+
+Extraction of parameters for every reaction norm (i.e. for each individual)
+
+```{r extract parameters of RNs, echo=FALSE}
+# Extract out common code with function
+id_model <- function(df) {
+  lm(FFD ~ scale(mean_4,center=T,scale=F), data = df)
+}
+
+(RNs4 <- data_4yrs%>% 
+  group_by(id)%>%                                 # Grouped df
+  nest()%>%                                       # Nested df
+  mutate(model = map(data, id_model))%>%          # Repeat common code using map function
+  mutate(coefs = map(model, broom::tidy))%>%      # Tidy df - a row for each coef
+  unnest(coefs)%>%                                # List of dfs back into regular df
+  select(id,term,estimate)%>%                     # Select important columns
+  spread(key = term, value = estimate)%>%         # Long to wide format
+  rename(intercept4=`(Intercept)`,slope4=`scale(mean_4, center = T, scale = F)`)) # Rename variables
+```
+
+Correlation among intercepts and slopes:
+
+```{r corr intercepts and slopes, echo=FALSE, fig.height=4, fig.width=5}
+with(RNs4,cor(intercept4,slope4))
+ggplot(RNs4,aes(x=intercept4,y=slope4))+
+  geom_point()+geom_smooth(method="lm",se=F,col="black")+
+  xlab("Intercept of the reaction norm")+ylab("Slope of the reaction norm")+my_theme()
+```
+
+Correlation here is much lower than using BLUPs - WHY???
+Problems with random effect of year in mixed models below?
+
+Check that parameters are correct graphically by plotting some reaction norms
+
+```{r check that parameters are correct, echo=FALSE, fig.height=4, fig.width=6}
+ggplot(subset(data_4yrs,id=="new_103"|id=="new_104"|id=="new_106"|
+                id=="new_107"|id=="new_108"|id=="new_109"),
+       aes(x=scale(mean_4,center=T,scale=F),y=FFD,color=id))+geom_smooth(method=lm,se=F,fullrange=T)+
+  xlab("Mean-centred mean daily temperature April")+
+  ylab("First flowering date")+my_theme_legend()+
+  scale_y_continuous(breaks=seq(45,75,2))
+```

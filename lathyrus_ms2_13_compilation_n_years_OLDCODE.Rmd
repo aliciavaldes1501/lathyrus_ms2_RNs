@@ -1,0 +1,311 @@
+---
+title: 'Lathyrus ms2: Compilation data 88-95'
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+```
+
+# OLD PERIOD
+
+Read data 88-95
+
+Some problems fixed (see Excel file LV88-96Alicia\_AV.xlsx).
+
+```{r}
+data8895<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/data88-95.csv",
+  header=T,sep=",",dec=".")  
+```
+
+```{r}
+head(data8895)
+str(data8895)
+```
+
+| Variable   | Years available |
+|------------|-----------------|
+| vol        | 88--95          |
+| fcode      | 88-95           |
+| fenol      | 88-95           |
+| nfl        | 88-95           |
+| fruit      | 88-95           |
+| totseed    | 88-94           |
+| intactseed | 88-94           |
+
+Convert data from wide to long format
+
+```{r}
+data8895 <- gather(data8895, key=variable, value=data, vol88:fruit95,
+                   factor_key=F)
+head(data8895)
+str(data8895)
+```
+
+Divide variable into "variable\_name" and "year"
+
+```{r}
+data8895<-separate(data8895, variable, 
+                   into = c("name", "value"), "(?<=[a-z])(?=[0-9])")
+names(data8895)<-c("id_nr","ruta","genet","variable_name","year","data")
+head(data8895)
+str(data8895)
+```
+
+In the table below, 1 means that the plant was flowering, 0 that it was not flowering (vegetative), and NA that no data is available for that year
+
+```{r}
+(flowering<-spread(data8895,key=variable_name,value=data)%>%
+    select(id_nr:fcode)%>%
+    spread(key=year,value=fcode)%>%
+    arrange(ruta,genet))
+```
+
+In the table below, for each year, 1 means that there is a value of the variable for that year, and 0 means that there is no value (NA).
+
+I assume that 0 values are true zeros! (so if the value of the variable is 0, the code will be 1 in the binary table).
+
+```{r}
+(variables<-spread(data8895,key=year,value=data)%>%
+    rename(y88="88",y89="89",y90="90",y91="91",y92="92",
+           y93="93",y94="94",y95="95")%>%
+    mutate(y88=ifelse(is.na(y88),0,1),
+           y89=ifelse(is.na(y89),0,1),
+           y90=ifelse(is.na(y90),0,1),
+           y91=ifelse(is.na(y91),0,1),
+           y92=ifelse(is.na(y92),0,1),
+           y93=ifelse(is.na(y93),0,1),
+           y94=ifelse(is.na(y94),0,1),
+           y95=ifelse(is.na(y95),0,1)))
+```
+
+Read data 87 and 96
+
+In this data, there were no problems in the Excel file (cleandata87and96.xlsx).
+
+```{r}
+data87<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/cleandata87.csv",
+  header=T,sep=",",dec=".") 
+data96<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/cleandata96.csv",
+  header=T,sep=",",dec=".") 
+```
+
+```{r}
+head(data87)
+head(data96)
+```
+
+Add data 87 and 96 to flowering
+
+```{r}
+flowering87<-data87[c(1:3,9)]
+flowering96<-data96[c(1:3,10)]
+names(flowering87)<-c("ruta87","genet87","id_nr","87")
+names(flowering96)<-c("ruta","genet","id_nr","96")
+(flowering<-flowering%>%
+  full_join(flowering87)%>%
+  full_join(flowering96)%>%
+    relocate("87", .after = genet)%>%
+    relocate("ruta87", .afer = genet)%>%
+    relocate("genet87", .after = ruta87))
+```
+
+Add data 87 and 96 to variables
+
+```{r}
+variables<-variables%>%
+  full_join(
+    full_join(gather(data87, key=variable_name, value=y87, nfl:fcode,
+                     factor_key=F),
+              gather(data96, key=variable_name, value=y96, nfl:fcode,
+                     factor_key=F))%>%
+      mutate(y87=ifelse(is.na(y87),0,1),y96=ifelse(is.na(y96),0,1))%>%
+      arrange(id_nr))
+full_join(gather(data87, key=variable_name, value=y87, nfl:fcode,factor_key=F),
+          gather(data96, key=variable_name, value=y96, nfl:fcode,factor_key=F))%>%
+  mutate(y87=ifelse(is.na(y87),0,1),y96=ifelse(is.na(y96),0,1))%>%
+  arrange(id_nr)
+variables<-variables%>%
+  relocate("ruta87", .after = genet)%>%
+  relocate("genet87", .after = ruta87)%>%
+  relocate("y87", .after = variable_name)
+```
+
+Create binary table for fitness
+
+```{r}
+fitness_bin_J<-subset(variables,variable_name=="intactseed")%>%
+  select(id_nr,y87:y96)%>%
+  arrange(id_nr)
+fitness_bin_j<-write.csv(fitness_bin_J,file="fitness_bin_J.csv")
+```
+
+
+Calculate number of years with information on FFD (n\_years\_FFD), number of years of flowering (n\_years\_flowering), number of years with information on fitness, and number of flowering years with information on fitness for each plant
+
+```{r}
+n_years<-full_join(
+  (subset(variables,variable_name=="fenol")%>%
+     mutate(n_years_FFD = rowSums(.[7:16],na.rm=T))%>%
+     select(id_nr,ruta,genet,ruta87,genet87,n_years_FFD)),
+  flowering%>%
+    mutate(n_years_flowering = rowSums(.[6:15],na.rm=T))%>%
+    select(id_nr,ruta,genet,n_years_flowering))
+n_years<-full_join(n_years,
+                   (subset(variables,variable_name=="intactseed")%>%
+     mutate(n_years_fitness = rowSums(.[7:16],na.rm=T))%>%
+     select(id_nr,ruta,genet,ruta87,genet87,n_years_fitness)))
+n_years<-full_join(n_years,
+                   subset(data8796,
+                          variable_name=="intactseed"|variable_name=="fcode")%>%
+  pivot_wider(names_from="variable_name",values_from="data")%>%
+  filter(fcode==1)%>% # Keep only flowering years
+  pivot_wider(names_from="year",values_from="intactseed")%>%
+  rename("y87"='87',"y88"='88',"y89"='89',"y90"='90',"y91"='91',
+         "y92"='92',"y93"='93',"y94"='94',"y95"='95',"y96"='96')%>%
+  mutate(y87=ifelse(is.na(y87),0,1),y88=ifelse(is.na(y88),0,1),
+         y89=ifelse(is.na(y89),0,1),y90=ifelse(is.na(y90),0,1),
+         y91=ifelse(is.na(y91),0,1),y92=ifelse(is.na(y92),0,1),
+         y93=ifelse(is.na(y93),0,1),y94=ifelse(is.na(y94),0,1),
+         y95=ifelse(is.na(y95),0,1),y96=ifelse(is.na(y96),0,1))%>%
+  mutate(n_years_fl_fitness = rowSums(.[3:12],na.rm=T))%>%
+  select(id_nr,n_years_fl_fitness)
+)
+```
+
+All the data
+
+```{r}
+data8796<-rbind(
+  (gather(data87, key=variable_name, value=data, nfl:fcode,
+                   factor_key=F)%>%
+  mutate(year=87)%>%
+  select(id_nr,variable_name,data,year)),
+  (data8895%>%
+  select(id_nr,variable_name,data,year)),
+  (gather(data96, key=variable_name, value=data, nfl:fcode,
+                   factor_key=F)%>%
+  mutate(year=96)%>%
+  select(id_nr,variable_name,data,year))
+)
+(data8796<-data8796%>%arrange(id_nr,variable_name,year))
+```
+
+Number of years when each plant was recorded --\> calculate in Excel from flowering table
+
+--\> See what to do with fitness data lacking in 1995. OK with what I calculated before?
+
+# NEW PERIOD
+
+Read data (got from mydata)
+
+```{r}
+data0617<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/data_new_period.csv",
+  header=T,sep=",",dec=".")  
+data0617$X<-NULL
+head(data0617)
+```
+
+Read info about number of shoots and shoot volume (to see when plants were not flowering but were vegetative)
+
+```{r}
+nshoots_vol<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/info_nshoots_vol_0617.csv",
+  header=T,sep=",",dec=".")
+head(nshoots_vol)
+nshoots_vol$id_nr<-nshoots_vol$id
+nshoots_vol$id<-NULL
+```
+
+```{r}
+data0617<-data0617%>%
+  full_join(subset(nshoots_vol,info_nshoots_vol==1))
+data0617$status<-with(data0617,
+                      ifelse(!is.na(FFD)|!is.na(n_fl)|!is.na(n_intact_seeds),1, 0))
+```
+
+In the table below, 1 means that the plant was flowering, 0 that it was not flowering (vegetative), and NA that no data is available for that year
+
+```{r}
+flowering_new<-data0617[c(1,10,12)]%>%
+  pivot_wider(names_from="year",values_from="status")
+```
+
+```{r}
+flowering_new<-flowering_new%>%
+  mutate(n_years_flowering = rowSums(.[2:13],na.rm=T))
+head(flowering_new)
+```
+
+```{r}
+(variables_new<-subset(mydata,period=="new")%>%
+   select(year,FFD,n_fl,shoot_vol,n_intact_seeds,id_nr)%>%
+   pivot_longer(names_to="variable_name",values_to="data",FFD:n_intact_seeds)%>%
+   pivot_wider(names_from="year",values_from="data")%>%
+   rename(y06="2006",y07="2007",y08="2008",y09="2009",y10="2010",y11="2011",
+          y12="2012",y13="2013",y14="2014",y15="2015",y16="2016",y17="2017")%>%
+   mutate(y06=ifelse(is.na(y06),0,1),
+          y07=ifelse(is.na(y07),0,1),
+          y08=ifelse(is.na(y08),0,1),
+          y09=ifelse(is.na(y09),0,1),
+          y10=ifelse(is.na(y10),0,1),
+          y11=ifelse(is.na(y11),0,1),
+          y12=ifelse(is.na(y12),0,1),
+          y13=ifelse(is.na(y13),0,1),
+          y14=ifelse(is.na(y14),0,1),
+          y15=ifelse(is.na(y15),0,1),
+          y16=ifelse(is.na(y16),0,1),
+          y17=ifelse(is.na(y17),0,1)))
+```
+
+```{r}
+n_years_new<-full_join(
+  subset(variables_new,variable_name=="FFD")%>%
+     mutate(n_years_FFD = rowSums(.[3:14],na.rm=T))%>%
+     select(id_nr,n_years_FFD),
+  flowering_new[c(1,14)])
+n_years_new<-full_join(n_years_new,
+                       (subset(variables_new,variable_name=="n_intact_seeds")%>%
+                          mutate(n_years_fitness = rowSums(.[3:14],na.rm=T))%>%
+                          select(id_nr,n_years_fitness)))
+n_years_new<-full_join(n_years_new,
+                       data0617%>%
+                       select(year,n_intact_seeds,id_nr,status)%>%
+                         filter(status==1)%>% # Keep only flowering years
+                         pivot_wider(names_from="year",values_from="n_intact_seeds")%>%
+                         rename("y06"='2006',"y07"='2007',"y08"='2008',"y09"='2009',
+                                "y10"='2010',"y11"='2011',"y12"='2012',"y13"='2013',
+                                "y14"='2014',"y15"='2015',"y16"='2016',"y17"='2017')%>%
+                         mutate(y06=ifelse(is.na(y06),0,1),y07=ifelse(is.na(y07),0,1),
+                                y08=ifelse(is.na(y08),0,1),y09=ifelse(is.na(y09),0,1),
+                                y10=ifelse(is.na(y10),0,1),y11=ifelse(is.na(y11),0,1),
+                                y12=ifelse(is.na(y12),0,1),y13=ifelse(is.na(y13),0,1),
+                                y14=ifelse(is.na(y14),0,1),y15=ifelse(is.na(y15),0,1),
+                                y16=ifelse(is.na(y16),0,1),y17=ifelse(is.na(y17),0,1),)%>%
+                         mutate(n_years_fl_fitness=rowSums(.[3:14],na.rm=T))%>%
+                         select(id_nr,n_years_fl_fitness)
+)
+head(n_years_new)
+```
+
+
+
+

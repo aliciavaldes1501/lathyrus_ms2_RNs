@@ -1,0 +1,419 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - Phenotypic selection analyses using BLUPs"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs2.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs2.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs2.RData")
+data_sel<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/data_sel.csv",
+                       header=T,sep="\t",dec=",") 
+#Read data used in ms1 (Data where both FFD and n_fl are available - 2411 flowering events)
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+These analyses are just a starting point, they should eventually be replaced by Bayesian analyses. 
+
+## Year-wise analyses
+
+How many individuals do we have for each year?
+
+```{r phenselBLUPs1, echo=FALSE, fig.height=4, fig.width=12}
+n_ids_total<-data_sel%>%
+  group_by(year)%>%
+  summarize(n_ids_total=n())
+
+n_ids_BLUPs<-data_4yrs%>%
+  group_by(year)%>%
+  summarize(n_ids_BLUPs=n())
+
+n_ids_total %>%
+  right_join(n_ids_BLUPs, by = "year")%>%
+  gather(n_ids_total, n_ids_BLUPs, key = "type",value="n_ids")%>%
+  ggplot(aes(year,n_ids,fill=type))+
+  geom_bar(stat="identity", position=position_dodge())+
+  geom_text(aes(label=n_ids),family="serif")+
+  scale_x_continuous(breaks=c(seq(1987,1996,1),seq(2006,2017,1)))+
+  xlab("Year")+ylab("Number of ids")+my_theme_legend()+
+  theme(axis.text.x = element_text(angle = 90))+
+  theme(legend.justification=c(1,1), legend.position=c(0.99,0.99))
+```
+
+The number of individuals where BLUPs are available are always lower than the total number of individuals. 
+
+Calculation of relative fitness and standardized intercept and slope within each year.
+
+```{r phenselBLUPs2}
+data_4yrs<-data_4yrs %>%
+  group_by(year) %>% 
+  mutate(n_intact_seeds_rel_yr=n_intact_seeds/mean(n_intact_seeds)) %>% # Rel. fitness
+  mutate(BLUP_int_std_yr=(BLUP_int-mean(BLUP_int))/sd(BLUP_int)) %>%    # Std. intercept
+  mutate(BLUP_slope_std_yr=(BLUP_slope-mean(BLUP_slope))/sd(BLUP_slope))%>% # Std. slope
+  ungroup()
+```
+
+Phenotypic selection models for each year: relative fitness against standardized BLUP intercept and slope
+
+```{r phenselBLUPs3}
+# Extract out common code with function
+yr_model <- function(df) {
+  lm(n_intact_seeds_rel_yr ~ BLUP_int_std_yr + BLUP_slope_std_yr, data = df)
+}
+
+yr_models <- data_4yrs%>%
+    group_by(year)%>% 
+    nest()%>%
+    mutate(model = map(data, yr_model))%>%       # Repeat common code using map function
+    mutate(coefs = map(model, broom::tidy))%>%   # Tidy df - a row for each coef
+    unnest(coefs)                                # List of dfs back into regular df
+
+# Years where intercept and/or slope show a significant effect on fitness 
+# (i.e. there is selection on RNs)
+subset(yr_models,p.value<0.05&!term=="(Intercept)") 
+```
+
+But intercept and slope of RNs are highly correlated...
+
+```{r phenselBLUPs4}
+with(data_4yrs,cor(BLUP_int_std_yr,BLUP_slope_std_yr))
+```
+
+... so maybe we should not use them together in the same model.
+
+### Models with only slope of the RN.
+
+```{r phenselBLUPs5}
+# Extract out common code with function
+yr_model_slope <- function(df) {
+  lm(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr, data = df)
+}
+
+yr_models_slope <- data_4yrs%>%
+  group_by(year)%>% 
+  nest()%>%
+  mutate(model = map(data, yr_model_slope))%>%
+  mutate(coefs = map(model, broom::tidy))%>%   # Tidy df - a row for each coef
+  unnest(coefs)                                # List of dfs back into regular df
+
+# Years where slope shows a significant effect on fitness 
+# (i.e. there is selection on RN slope)
+subset(yr_models_slope,p.value<0.05&!term=="(Intercept)") 
+```
+
+### Models with only intercept of the RN.
+
+```{r phenselBLUPs6}
+# Extract out common code with function
+yr_model_int <- function(df) {
+  lm(n_intact_seeds_rel_yr ~ BLUP_int_std_yr, data = df)
+}
+
+yr_models_int <- data_4yrs%>%
+  group_by(year)%>% 
+  nest()%>%
+  mutate(model = map(data, yr_model_int))%>%
+  mutate(coefs = map(model, broom::tidy))%>%   # Tidy df - a row for each coef
+  unnest(coefs)                                # List of dfs back into regular df
+
+# Years where intercept shows a significant effect on fitness 
+# (i.e. there is selection on RN intercept)
+subset(yr_models_int,p.value<0.05&!term=="(Intercept)") 
+```
+
+### Are estimates of selection on RNs related to temperature?
+
+Merge estimates of selection on RNs with previous data and get summarized data by year
+
+```{r phenselBLUPs7}
+(data_4yrs_summ<-data_4yrs %>%
+  group_by(year)%>%
+  summarise(mean_4=mean(mean_4))%>%
+  select(year,mean_4)%>%
+  right_join(yr_models_slope%>%
+               filter(!term=="(Intercept)")%>%
+               select(year,term,estimate)%>%
+               spread(key = term, value = estimate)%>%  # Long to wide format
+               rename(estim_slope_yr=BLUP_slope_std_yr),
+             by = "year")%>%
+  right_join(yr_models_int%>%
+               filter(!term=="(Intercept)")%>%
+               select(year,term,estimate)%>%
+               spread(key = term, value = estimate)%>%  # Long to wide format
+               rename(estim_int_yr=BLUP_int_std_yr),
+             by = "year"))
+```
+
+```{r phenselBLUPs8, echo=FALSE, fig.height=4, fig.width=10}
+grid.arrange(
+  ggplot(data_4yrs_summ,aes(x=mean_4,y=estim_slope_yr))+geom_point()+
+  geom_smooth(col="black",method="lm",se=F)+geom_smooth(col="black",lty="dashed",se=F)+
+  xlab("Mean daily temperature April")+ylab("Estimate of selection on RN slope")+
+  my_theme(), 
+  ggplot(data_4yrs_summ,aes(x=mean_4,y=estim_int_yr))+geom_point()+
+  geom_smooth(col="black",method="lm",se=F)+geom_smooth(col="black",lty="dashed",se=F)+
+  xlab("Mean daily temperature April")+ylab("Estimate of selection on RN intercept")+
+  my_theme(),
+  ncol=2)
+```
+
+According to the graphs it seems that with increasing temperatures, selection favors lower (more negative) slopes and lower elevations of the RNs.
+
+The year 2017 is an outlier with a very negative slope and intercept of the RN. This  might be because only 4 out of 78 plants produced seeds in 2017. 
+
+```{r phenselBLUPs9}
+nrow(subset(data_4yrs,year==2017&n_intact_seeds>0))
+nrow(subset(data_4yrs,year==2017))
+```
+
+Graphs with 2017 removed:
+
+```{r phenselBLUPs10, echo=FALSE, fig.height=4, fig.width=10}
+grid.arrange(
+  ggplot(subset(data_4yrs_summ,!year==2017),
+         aes(x=mean_4,y=estim_slope_yr))+geom_point()+
+    geom_smooth(col="black",method="lm",se=F)+
+    geom_smooth(col="black",lty="dashed",se=F)+
+    xlab("Mean daily temperature April")+ylab("Estimate of selection on RN slope")+
+    my_theme(), 
+  ggplot(subset(data_4yrs_summ,!year==2017),
+         aes(x=mean_4,y=estim_int_yr))+geom_point()+
+    geom_smooth(col="black",method="lm",se=F)+
+    geom_smooth(col="black",lty="dashed",se=F)+
+    xlab("Mean daily temperature April")+ylab("Estimate of selection on RN intercept")+
+    my_theme(),
+  ncol=2)
+```
+
+Models with all years (NS)
+
+```{r phenselBLUPs11}
+tidy(lm(estim_slope_yr~mean_4,data_4yrs_summ))
+tidy(lm(estim_int_yr~mean_4,data_4yrs_summ))
+```
+
+Models without 2017 (significant)
+
+```{r phenselBLUPs12}
+tidy(lm(estim_slope_yr~mean_4,subset(data_4yrs_summ,!year==2017)))
+tidy(lm(estim_int_yr~mean_4,subset(data_4yrs_summ,!year==2017)))
+```
+
+The slope and intercept of the reaction norm decrease with increasing temperatures (when removing 2017).
+
+Should we also remove 2017 from the calculations of RN parameters (BLUPs)?
+
+## Analyses with all years
+
+### n = number of reproductive events (mixed models)
+
+#### Are there among-year differences in selection on RN parameters?
+
+We use models including the interaction between yearly-standardized RN parameters and year. The main effect of year was not included as fitness was relativized within years prior to analysis. Plant individual was included as a random effect. 
+
+##### Slope of the RN
+
+```{r phenselBLUPs13}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:year+
+             (1|id),data = data_4yrs))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:year+
+             (1|id),data = data_4yrs),type="II")
+```
+
+##### Intercept of the RN
+
+```{r phenselBLUPs14}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:year+
+             (1|id),data = data_4yrs))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:year+
+             (1|id),data = data_4yrs),type="II")
+```
+
+Yes, there are differences among years in selection on RN slope and intercept.
+
+#### Are differences in selection on RN parameters among years related to spring temperature?
+
+##### Slope of the RN
+
+```{r phenselBLUPs15}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:mean_4+
+             (1|id),data = data_4yrs))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:mean_4+
+             (1|id),data = data_4yrs),type="II")
+```
+
+Removing 2017:
+
+```{r phenselBLUPs16}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:mean_4+
+             (1|id),data = subset(data_4yrs,!year==2017)))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:mean_4+
+             (1|id),data = subset(data_4yrs,!year==2017)),type="II")
+```
+
+##### Intercept of the RN
+
+```{r phenselBLUPs17}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:mean_4+
+             (1|id),data = data_4yrs))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:mean_4+
+             (1|id),data = data_4yrs),type="II")
+```
+
+Removing 2017:
+
+```{r phenselBLUPs18}
+summary(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:mean_4+
+             (1|id),data = subset(data_4yrs,!year==2017)))
+Anova(lmer(n_intact_seeds_rel_yr ~ BLUP_int_std_yr+BLUP_int_std_yr:mean_4+
+             (1|id),data = subset(data_4yrs,!year==2017)),type="II")
+```
+
+Yes, differences in selection on RN slope and intercept among years are related to spring temperature.
+
+```{r phenselBLUPs19, echo=FALSE, fig.height=5, fig.width=5}
+interaction1<-data.frame(effect(term="BLUP_slope_std_yr:mean_4",
+                                mod=lmer(n_intact_seeds_rel_yr ~ BLUP_slope_std_yr+BLUP_slope_std_yr:mean_4+
+             (1|id),data = subset(data_4yrs,!year==2017)),
+                       xlevels=list(BLUP_slope_std_yr=seq(-2.6,2.7,0.1),
+                                    mean_4=seq(3.6,8.4,0.1))))
+myPalette <- colorRampPalette(brewer.pal(9, "YlOrRd"))
+ggplot(interaction1, aes(BLUP_slope_std_yr,fit, group = as.factor(mean_4)))+
+  geom_smooth(method=lm,se=F,size=0.5,aes(BLUP_slope_std_yr,fit,color=mean_4))+
+  my_theme()+scale_colour_gradientn(colours = myPalette(100))+
+  theme(legend.position="top")+labs(colour="Mean daily temperature April")+
+  xlab("Standardized RN slope")+ylab("Relative number of intact seeds")
+```
+
+Again, according to the graph it seems that with increasing temperatures, selection favors lower (more negative) slopes (and therefore lower elevations) of the RNs.
+
+### n = number of individuals (linear models)
+
+Calculation of mean fitness (sum of fitness divided by number of years from first year when each id appeared to last year of each period). Then calculate relative fitness and standardized intercept and slope over all years.
+
+With 3 years of data:
+
+```{r phenselBLUPs20}
+data_3yrs<-data_3yrs%>%
+  mutate(period=ifelse(str_detect(as.character(id), "^o")==TRUE,"old","new"),
+         n_years_from_first=ifelse(period=="old",1996-(first_yr-1),2017-(first_yr-1)))
+
+(data_3yrs_total<-data_3yrs %>%
+  group_by(id)%>%
+  summarise(n_years=n(),n_years_from_first=mean(n_years_from_first),
+            mean_fitness=sum(n_intact_seeds)/mean(n_years_from_first))%>%
+  mutate(mean_fitness_rel=mean_fitness/mean(mean_fitness)))         # Rel. fitness
+```
+
+With 4 years of data:
+
+```{r phenselBLUPs21}
+data_4yrs<-data_4yrs%>%
+  mutate(period=ifelse(str_detect(as.character(id), "^o")==TRUE,"old","new"),
+         n_years_from_first=ifelse(period=="old",1996-(first_yr-1),2017-(first_yr-1)))
+
+(data_4yrs_total<-data_4yrs %>%
+  group_by(id)%>%
+  summarise(n_years=n(),n_years_from_first=mean(n_years_from_first),
+            mean_fitness=sum(n_intact_seeds)/mean(n_years_from_first),
+            BLUP_int=mean(BLUP_int),BLUP_slope=mean(BLUP_slope))%>%
+  mutate(mean_fitness_rel=mean_fitness/mean(mean_fitness)) %>%         # Rel. fitness
+  mutate(BLUP_int_std=(BLUP_int-mean(BLUP_int))/sd(BLUP_int)) %>%      # Std. intercept
+  mutate(BLUP_slope_std=(BLUP_slope-mean(BLUP_slope))/sd(BLUP_slope))) # Std. slope
+```
+
+With 5 years of data:
+
+```{r phenselBLUPs22}
+data_5yrs<-data_5yrs%>%
+  mutate(period=ifelse(str_detect(as.character(id), "^o")==TRUE,"old","new"),
+         n_years_from_first=ifelse(period=="old",1996-(first_yr-1),2017-(first_yr-1)))
+
+(data_5yrs_total<-data_5yrs %>%
+  group_by(id)%>%
+  summarise(n_years=n(),n_years_from_first=mean(n_years_from_first),
+            mean_fitness=sum(n_intact_seeds)/mean(n_years_from_first))%>%
+  mutate(mean_fitness_rel=mean_fitness/mean(mean_fitness)))         # Rel. fitness
+```
+
+Phenotypic selection models performed only with RN slope (because of high correlation with RN intercept)
+
+```{r phenselBLUPs23}
+summary(lm(mean_fitness_rel ~ BLUP_slope_std,data = data_4yrs_total))
+Anova(lm(mean_fitness_rel ~ BLUP_slope_std,data = data_4yrs_total))
+```
+
+```{r phenselBLUPs24, echo=FALSE, fig.height=4, fig.width=5}
+ggplot(data_4yrs_total,aes(x=BLUP_slope_std,y=mean_fitness_rel))+
+  geom_point()+geom_smooth(method="lm",color="black",se=F)+
+    geom_text_repel(data=subset(data_4yrs_total, mean_fitness_rel > 6),
+            aes(BLUP_slope_std, mean_fitness_rel,label=id),size = 3)+
+  xlab("Standardized RN slope")+ylab("Relative mean number of intact seeds")+
+  my_theme()
+```
+
+Over all years, (mean) fitness is higher for individuals with more negative slopes (and therefore lower elevations) of the RNs, i.e. for individuals that have greater plasticity across temperatures. 
+
+POTENTIAL PROBLEM: Mean fitness over all years increases with the number of years that an individual has been recorded flowering. 
+
+```{r phenselBLUPs25, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(data_4yrs_total,aes(x=n_years,y=mean_fitness_rel))+
+    geom_point(alpha=0.5)+geom_smooth(method="lm",color="black",se=F)+
+    xlab("Number of years")+ylab("Relative mean number of intact seeds")+
+    my_theme()
+summary(lm(mean_fitness_rel~n_years,data=data_4yrs_total))
+```
+
+```{r save data, include=FALSE}
+save(data_3yrs, file="data_3yrs3.RData")
+save(data_3yrs_total, file="data_3yrs_total1.RData")
+save(data_4yrs, file="data_4yrs3.RData")
+save(data_4yrs_total, file="data_4yrs_total1.RData")
+save(data_5yrs, file="data_5yrs3.RData")
+save(data_5yrs_total, file="data_5yrs_total1.RData")
+```

@@ -1,0 +1,3478 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 5 (Arnold et al. 2019 Phil. Trans. R. Soc. B)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+library(lmerTest)
+library(RPushbullet)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+```{r summarySE function, include=FALSE}
+## Gives count, mean, standard deviation, standard error of the mean, and confidence interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+  library(plyr)
+  
+  # New version of length which can handle NA's: if na.rm==T, don't count them
+  length2 <- function (x, na.rm=FALSE) {
+    if (na.rm) sum(!is.na(x))
+    else       length(x)
+  }
+  
+  # This does the summary. For each group's data frame, return a vector with
+  # N, mean, and sd
+  datac <- ddply(data, groupvars, .drop=.drop,
+                 .fun = function(xx, col) {
+                   c(N    = length2(xx[[col]], na.rm=na.rm),
+                     mean = mean   (xx[[col]], na.rm=na.rm),
+                     sd   = sd     (xx[[col]], na.rm=na.rm)
+                   )
+                 },
+                 measurevar
+  )
+  
+  # Rename the "mean" column    
+  datac <- rename(datac, c("mean" = measurevar))
+  
+  datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+  
+  # Confidence interval multiplier for standard error
+  # Calculate t-statistic for confidence interval: 
+  # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+  ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+  datac$ci <- datac$se * ciMult
+  
+  return(datac)
+}
+```
+
+
+```{r load models, include=FALSE}
+# Load previously run models so that they are not run when knitting
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR10.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR12.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR14.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR15.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1987a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1988a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1989a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1990a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1991a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1992a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1993a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1994a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1995a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1996a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2006a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2007a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2008a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2009a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2010a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2011a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2012a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2013a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2014a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2015a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2016a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2017a.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_oldA.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_newA.RData")
+
+```
+
+# Data preparation
+
+```{r data prep}
+# Read data
+alldata<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/alldata.csv",
+  header=T,sep="\t",dec=".")  
+data_sel<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/data_sel.csv",
+                       header=T,sep="\t",dec=",") 
+
+# Create a subset of data with plants with 5 or more years of data
+data_5yrs<-select(alldata,c(1,3,10,12,14,19))%>% # Select columns needed by now
+  right_join(unique(data_sel[c(1,171:172,183)]))
+subset(subset(data_5yrs,is.na(n_intact_seeds)),!is.na(FFD)) 
+# O cases with no fitness data and FFD data
+data_5yrs<-subset(data_5yrs,!is.na(n_intact_seeds)) # Select cases with fitness data
+data_5yrs$id<-droplevels(data_5yrs$id)
+
+subset(data_5yrs,is.na(FFD)&is.na(n_fl)&n_intact_seeds==0) 
+# These probably did not flower - remove
+
+data_5yrs<-anti_join(data_5yrs,subset(data_5yrs,is.na(FFD)&is.na(n_fl)&n_intact_seeds==0))
+
+subset(data_5yrs,is.na(FFD)&is.na(n_fl)&is.na(n_intact_seeds)) 
+# All plants/years are flowering events here
+
+# n_years_fl = Number of years when the plant has flowered
+# n_years_FFD = Number of years when we have data for FFD
+# n_years_life = Number of years when the plant was alive --> Calculated by hand from data
+
+n_years_FFD<-data_5yrs %>% group_by(id) %>% summarise(n_years_FFD = sum(!is.na(FFD)))
+n_years_life<-read.table(
+  "C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/n_years_life.txt",
+  header=T)  
+data_5yrs<-data_5yrs%>%
+ rbind(list(2016,"new_121",NA,2,NA,NA,5.665,12.20806,1.908333)) 
+# Add data for id new_121 -> 2 flowers in 2016 (from comment in Excel files)
+
+data_5yrs<-data_5yrs%>%
+  right_join(n_years_FFD)%>%
+  group_by(id)%>%
+  mutate(n_years_fl=n())%>%
+  arrange(.,id)%>%
+  filter(n_years_FFD>=5)%>% # Keep individuals for which we have data on FFD for 5+ years
+  filter(!is.na(FFD))%>% # Keep records for which we have FFD values
+  droplevels()%>%
+  right_join(n_years_life) # Add info on n_years_life
+
+length(levels(data_5yrs$id)) # 163 (before 156) plant individuals
+```
+
+# Check for non-linearities
+
+Code based on Arnold et al 2019 New Phyt.
+
+The x variable (mean daily temperature April) is mean-centered (substracting the mean), so the intercepts reflect average values for the population and individuals. From here on, we use this mean-centred temperature (cmean_4).
+
+```{r BLUPs_all1}
+data_5yrs$cmean_4<-scale(data_5yrs$mean_4,center=T,scale=F)
+```
+
+Plot the main effects (raw values of FFD against mean-centred temperatures for each plant id)
+
+```{r BLUPs_all2, echo=FALSE, fig.height=3, fig.width=4}
+ggplot(data_5yrs, aes(x = cmean_4, y = FFD, group = id)) +
+  geom_line(aes(colour = id),size = 0.1) + ylab("FFD") + 
+  xlab("Mean-centred\nmean daily temperature April") + my_theme()
+```
+
+## Basic linear model 
+
+Fit a linear model for the fixed effect of temperature on FFD and observe the average population-level reaction norm. Note that we also add a random effect for 'year' to take account of the repeated measures at each temperature (to account for differences among the years across which each id is represented). The mixed model is to be fitted using ML rather than REML so that models that contain different fixed effects can be compared directly.
+
+Using blmer which does maximum a posteriori estimation for linear and generalized linear mixed-effects models in a Bayesian setting. Allows the user to do Bayesian inference or penalized maximum likelihood, with priors imposed on the different model components. 
+
+```{r BLUPs_all3}
+model1.1 <- blmer(FFD ~ cmean_4 + (1|year), REML = FALSE, data = data_5yrs,
+                  lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.1)
+r.squaredGLMM(model1.1)
+```
+
+Visually assess how well the linear model fits the raw data by overlaying the regression line from model1.1 as an average population-level reaction norm. Use the predict function to predict y-values accross the continuous x-axis and then plot the fixed effect of temperature from model1.1 over the raw id-specific reaction norms.
+
+```{r BLUPs_all4, fig.height=3, fig.width=4}
+temperature_pred <- data.frame(cmean_4 = seq(from = min(data_5yrs$cmean_4),
+                                                 to = max(data_5yrs$cmean_4),
+                                                 length.out = 50))
+temperature_pred$fit1.1 <- predict(model1.1,
+                                   newdata = temperature_pred, re.form = NA) 
+# re.form=NA includes no random effects
+
+# Plot the raw data and overlay the fit of Model1.1
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.1)) +
+  geom_line(data = data_5yrs, aes(y = FFD, colour = id),size = 0.1) +
+  geom_line(size = 2) +  ylab("FFD") + 
+  xlab("Mean-centred\nmean daily temperature April")+my_theme()
+```
+
+## Quadratic fixed effects model
+
+Fit a quadratic model for the fixed effect of temperature on FFD.
+
+```{r BLUPs_all5}
+model1.2 <- blmer(FFD ~ poly(cmean_4, 2, raw = T) + (1|year),
+                 REML = FALSE, data = data_5yrs,
+                 lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.2)
+r.squaredGLMM(model1.2)
+```
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all6, fig.height=3, fig.width=4}
+temperature_pred$fit1.2 <- predict(model1.2, 
+                                   newdata = temperature_pred, re.form = NA)
+
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.2)) +
+  geom_line(data = data_5yrs, aes(y = FFD, colour = id),size = 0.1) +
+  geom_line(size = 2) + ylab("FFD") + 
+  xlab("Mean-centred\nmean daily temperature April")+my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all7}
+chi2 <- 2*(summary(model1.2)$logLik - summary(model1.1)$logLik)
+1-pchisq(chi2,1)
+
+AIC(model1.1, model1.2)
+```
+
+Lower R2, non-significant LRT p-value and larger AIC. Model1.1 with only linear (non-quadratic effects) is better.
+
+## Linear fixed effects with random intercepts model
+
+Fit a linear mixed effects model (random intercepts only) for the fixed effect of temperature on FFD and random effect of id intercepts. We are allowing the y-intercept value to vary among ids.
+
+```{r BLUPs_all8}
+model1.3 <- blmer(FFD ~ cmean_4 + (1|year) + (1|id), 
+                  REML = FALSE, data = data_5yrs,
+                  lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.3)
+r.squaredGLMM(model1.3)
+```
+
+The outcome of the mixed-effects model is the linear effect of temperature on FFD, whilst allowing the intercepts of each id’s FFD to account for some of the residual variance in the model.
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all9, fig.height=3, fig.width=4}
+temperature_pred$fit1.3 <- predict(model1.3, 
+                                   newdata = temperature_pred, re.form = NA)
+
+# Make a prediction for the average population-level mean reaction norm 
+# and append it to the dataset
+data_5yrs$pred_pop1.3  <- predict(model1.3, re.form = NA)
+# Make predictions for each id-level reaction norm 
+data_5yrs$pred_id1.3 <- predict(model1.3, re.form = ~(1|id))
+
+# Plot predicted id reaction norms over the raw data, along with the overall mean
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.3)) +
+  geom_line(data = data_5yrs, aes(y = pred_id1.3, group = id, colour = id), 
+            lty = 2,size = 0.1)+
+  geom_line(data = data_5yrs, aes(y = FFD, group = id, colour = id),size = 0.1) +
+  geom_line(size = 2) +
+  ylab("FFD") + xlab("Mean-centred\nmean daily temperature April") +  my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all10}
+chi2 <- 2*(summary(model1.3)$logLik - summary(model1.1)$logLik)
+1-pchisq(chi2, 1)
+
+AIC(model1.1, model1.2, model1.3)
+```
+
+R2 has not substantially increased, but significant LRT p-value and smaller AIC. Model1.3 with random intercepts explains more residual variance than model1.1 without trading-off against increased model complexity.
+
+This means that there is significant variation in intercepts of the RN among individuals.
+
+## Linear fixed effects with linear random regression model
+
+Fit a linear mixed effects model for the fixed effect of temperature on FFD and random effect of id intercepts and slopes. Allows the slopes of ids to vary in addition to the intercepts, so that the random regression slopes might be fit better to the observed patterns in the raw data. The addition of ‘+x-variable’ (here: ‘1+cmean_4’) to the left side of the random effect term (‘|id’) in model1.3 allows the slopes of the random id regressions to vary across mean-centred temperature.
+
+We use blmer instead of lmer because otherwise this model has a singular fit.
+
+```{r BLUPs_all11}
+model1.4 <- blmer(FFD ~ cmean_4 + (1|year) + (1+cmean_4|id), REML = FALSE,
+                  data = data_5yrs,lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.4)
+r.squaredGLMM(model1.4)
+```
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all12, fig.height=3, fig.width=4}
+temperature_pred$fit1.4 <- predict(model1.4, newdata = temperature_pred, re.form = NA)
+
+# Make a prediction for the population-level mean reaction norm 
+# and append it to the dataset
+data_5yrs$pred_pop1.4  <- predict(model1.4, re.form = NA)
+# Make predictions for the id-level reaction norms
+data_5yrs$pred_id1.4 <- predict(model1.4, re.form = ~(1+cmean_4|id))
+
+# Plot predicted id reaction norms over the raw data, along with the overall mean
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.4)) +
+  geom_line(data = data_5yrs, aes(y = pred_id1.4, group = id, colour = id), 
+            lty = 2,size = 0.1) +
+  geom_line(data = data_5yrs, aes(y = FFD, group = id, colour = id),size = 0.1) +
+  geom_line(size = 2) +
+  ylab("FFD") + xlab("Mean-centred\nmean daily temperature April") +  my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all13}
+chi2 <- 2*(summary(model1.4)$logLik - summary(model1.3)$logLik)
+# The df difference between models can be checked by 
+# looking at the df within the models being compared
+summary(model1.3)$logLik
+summary(model1.4)$logLik
+# Note that between model1.3 and model1.4 there is a change of 2 df, so the 
+# pchisq change needs to be specified with 2 df rather than 1 as in previous comparisons.
+1-pchisq(chi2, 2)
+
+AIC(model1.1, model1.2, model1.3, model1.4)
+```
+
+Significant LRT p-value and smaller AIC. The random regression mixed model (model1.4) has significantly improved the model fit to the data.
+
+This means that there is also significant variation in slopes of the RN among individuals.
+
+## Linear fixed effects with quadratic random regression model
+
+A final attempt to improve the model fit is to allow the random effect of id to vary in not
+only intercept and slope, but also in curvature, by fitting an additional quadratic random effect term.
+
+Fit a linear mixed effects model for the fixed effect of growth temperature on FFD and random effect of id intercepts, slopes, and curvature
+
+```{r BLUPs_all14}
+model1.5 <- blmer(FFD ~ cmean_4 + (1|year) + (1 + cmean_4 + I(cmean_4^2)|id), 
+                  REML = FALSE,data = data_5yrs,lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.5)
+r.squaredGLMM(model1.5)
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all15}
+chi2 <- 2*(summary(model1.5)$logLik - summary(model1.4)$logLik)
+# The df difference between models can be checked by 
+# looking at the df within the models being compared
+summary(model1.4)$logLik
+summary(model1.5)$logLik
+# Note that between model1.3 and model1.4 there is a change of 3 df, so the pchisq 
+# change needs to be specified with 3 df rather than 1 or 2 as in previous comparisons.
+1-pchisq(chi2, 3)
+
+AIC(model1.1, model1.2, model1.3, model1.4, model1.5)
+```
+
+Model1.4 is the best model for these data. We will proceed hereafter with model1.4 to extract the best linear unbiased predictors (BLUPs) for each id.
+
+## Extract BLUPs from model1.4 (linear random regression mixed model)
+
+BLUPs represent the response of a given id to the fixed effect of temperature as the difference between that id’s predicted response and the population-level average predicted response. Here, we calculate and plot BLUPs for ranking plasticity.
+
+```{r BLUPs_all16}
+id_blups <- ranef(model1.4)$`id`
+id_index <- as.factor(c(1:163))
+id_data  <- cbind(id_index, id_blups)
+colnames(id_data) <- c("id", "BLUP_int", "BLUP_slope")
+with(id_data,cor(BLUP_int,BLUP_slope)) # highly correlated!
+```
+
+The BLUP intercept term indicates the difference in id elevation relative to the population-average, so more positive values of BLUP intercept indicate that the id’s reaction norm occurs above the population-level average and negative values are below the population-level average. The BLUP intercept values are not a measure of plasticity, but these values may be correlated with BLUP slope values and otherwise may be a parameter of interest for comparing among ids.
+
+```{r BLUPs_all17, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id, BLUP_int)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, BLUP_int,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+The BLUP slope estimate is the difference in slope (relative steepness of change) between the population-level average response and the response of the id. Here, that is the difference in slope of FFD for each value of temperature relative to the population-level average slope.
+
+```{r BLUPs_all18, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id, BLUP_slope)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("Plasticity (BLUP slope estimate)") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, BLUP_slope,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+We now add the BLUP slopes for the ids to the population average. Because the population-level average response is negative overall, all ids have a negative slope when the BLUP slope estimates are added to the population-level average slope estimate from model1.4. 
+
+```{r BLUPs_all19, echo=FALSE, fig.height=4, fig.width=10}
+pop_av_slope <- fixef(model1.4)[2]
+id_data$id_slopes <- id_blups$cmean_4 + pop_av_slope
+# BLUPs by slope + population-level average
+ggplot(id_data, aes(id, id_slopes)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("Plasticity (population-average\n+ BLUP slope estimate)") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, id_slopes,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+The BLUP intercept and slope estimates are sometimes correlated. The correlation coefficient is given in the random effects correlation from the model1.4 summary, which is 0.80. This positive relationship can clearly be seen when plotting the BLUP slope estimate against the BLUP intercept estimate. Ids with the most positive BLUP slope estimate (labelled) have the highest positive intercept, and have the least plasticity across growth temperatures (see previous figs with the same individuals labelled). 
+
+```{r BLUPs_all20, echo=FALSE, fig.height=4, fig.width=4}
+ggplot(id_data, aes(BLUP_int, BLUP_slope)) +
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(BLUP_int,BLUP_slope,label=id),size = 3) +
+  xlab("BLUP intercept estimate") +
+  ylab("BLUP slope estimate") + my_theme()
+```
+
+We can rank the BLUPs in order: sorting BLUPs by slope of most to least plastic. Because the population-level average response is negative, the most negative BLUP slope estimates represent steeper reaction norm slopes and hence greater plasticity, and more positive BLUP slope estimates represent flatter reaction norms and less plasticity in FFD in response to temperatures.
+
+```{r BLUPs_all21, echo=FALSE, fig.height=4, fig.width=10}
+id_data$id_ordered <- factor(id_data$id,levels = id_data$id[order(id_data$BLUP_slope)])
+ggplot(id_data, aes(id_ordered, BLUP_slope)) +
+  geom_bar(stat = "identity", aes(group = id, fill = id)) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id_ordered, BLUP_slope,label=id),size = 3) +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  my_theme() + theme(axis.text.x = element_blank())
+```
+
+Another way to visualise the plasticity rank for negative data is by adding the BLUP slope values to the population-level average effect of temperature.
+
+```{r BLUPs_all22, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id_ordered, id_slopes)) +
+  geom_bar(stat = "identity", aes(group = id, fill = id)) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id_ordered, id_slopes,label=id),size = 3) +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (population-average\n+ BLUP slope estimate)") +
+  my_theme() + theme(axis.text.x = element_blank())
+```
+
+Important note! BLUPs estimated from linear mixed-effects regression models fitted in lme4 are single point estimates that do not have associated measures of uncertainty. As a result, any derived statistics or formal interpretation of plasticity based on these BLUPs is potentially very dangerous and anticonservative without properly accounting for estimation uncertainty. For using BLUPs beyond simple ranking (e.g., of the least to most plastic genotypes), it is strongly encouraged to read the references provided here to avoid the misuse of BLUPs by using a Bayesian MCMC framework (e.g., by using the MCMCglmm package in R) to generate estimates of uncertainty around BLUPs (Hadfield, 2010; Hadfield et al., 2010; Houslay & Wilson, 2017).
+
+# Check for non-linearities (two periods)
+
+Plot the main effects (raw values of FFD against mean-centred temperatures for each plant id)
+
+```{r BLUPs_per1, echo=FALSE, fig.height=4, fig.width=8}
+data_5yrs<-data_5yrs%>%
+  mutate(period=ifelse(grepl("old",id),"old","new"))
+grid.arrange(
+  ggplot(subset(data_5yrs,period=="old"), aes(x = cmean_4, y = FFD, group = id)) +
+    geom_line(aes(colour = id),size = 0.1) + ylab("FFD") + ggtitle("Old period") +
+    xlab("Mean-centred\nmean daily temperature April") + my_theme(),
+  ggplot(subset(data_5yrs,period=="new"), aes(x = cmean_4, y = FFD, group = id)) +
+    geom_line(aes(colour = id),size = 0.1) + ylab("FFD") + ggtitle("New period") +
+    xlab("Mean-centred\nmean daily temperature April") + my_theme(), ncol=2)
+```
+
+## Basic linear model 
+
+```{r BLUPs_per2}
+model1.1old <- blmer(FFD ~ cmean_4 + (1|year), REML = FALSE, 
+                     data = subset(data_5yrs,period=="old"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+model1.1new <- blmer(FFD ~ cmean_4 + (1|year), REML = FALSE,
+                     data = subset(data_5yrs,period=="new"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.1old)
+summary(model1.1new)
+r.squaredGLMM(model1.1old)
+r.squaredGLMM(model1.1new)
+```
+
+## Quadratic fixed effects model
+
+```{r BLUPs_per3}
+model1.2old <- blmer(FFD ~ poly(cmean_4, 2, raw = T) + (1|year), REML = FALSE, 
+                     data = subset(data_5yrs,period=="old"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+model1.2new <- blmer(FFD ~ poly(cmean_4, 2, raw = T) + (1|year), REML = FALSE,
+                     data = subset(data_5yrs,period=="new"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.2old)
+summary(model1.2new)
+r.squaredGLMM(model1.2old)
+r.squaredGLMM(model1.2new)
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_per4}
+chi2 <- 2*(summary(model1.2old)$logLik - summary(model1.1old)$logLik)
+1-pchisq(chi2,1)
+chi2 <- 2*(summary(model1.2new)$logLik - summary(model1.1new)$logLik)
+1-pchisq(chi2,1)
+
+AIC(model1.1old, model1.2old)
+AIC(model1.1new, model1.2new)
+```
+
+## Linear fixed effects with random intercepts model
+
+```{r BLUPs_per5}
+model1.3old <- blmer(FFD ~ cmean_4 + (1|year) + (1|id), REML = FALSE, 
+                     data = subset(data_5yrs,period=="old"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+model1.3new <- blmer(FFD ~ cmean_4 + (1|year) + (1|id), REML = FALSE,
+                     data = subset(data_5yrs,period=="new"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.3old)
+summary(model1.3new)
+r.squaredGLMM(model1.3old)
+r.squaredGLMM(model1.3new)
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_per6}
+chi2 <- 2*(summary(model1.3old)$logLik - summary(model1.1old)$logLik)
+1-pchisq(chi2, 1)
+chi2 <- 2*(summary(model1.3new)$logLik - summary(model1.1new)$logLik)
+1-pchisq(chi2, 1)
+
+AIC(model1.1old, model1.2old, model1.3old)
+AIC(model1.1new, model1.2new, model1.3new)
+```
+
+## Linear fixed effects with linear random regression model
+
+```{r BLUPs_per7}
+model1.4old <- blmer(FFD ~ cmean_4 + (1|year) + (1+cmean_4|id), REML = FALSE, 
+                     data = subset(data_5yrs,period=="old"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+model1.4new <- blmer(FFD ~ cmean_4 + (1|year) + (1+cmean_4|id), REML = FALSE,
+                     data = subset(data_5yrs,period=="new"),
+                     lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.4old)
+summary(model1.4new)
+r.squaredGLMM(model1.4old)
+r.squaredGLMM(model1.4new)
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_per8}
+chi2 <- 2*(summary(model1.4old)$logLik - summary(model1.3old)$logLik)
+# The df difference between models can be checked by 
+# looking at the df within the models being compared
+summary(model1.3old)$logLik
+summary(model1.4old)$logLik
+# Note that between model1.3 and model1.4 there is a change of 2 df, so the 
+# pchisq change needs to be specified with 2 df rather than 1 as in previous comparisons.
+1-pchisq(chi2, 2)
+chi2 <- 2*(summary(model1.4new)$logLik - summary(model1.3new)$logLik)
+# The df difference between models can be checked by 
+# looking at the df within the models being compared
+summary(model1.3new)$logLik
+summary(model1.4new)$logLik
+# Note that between model1.3 and model1.4 there is a change of 2 df, so the 
+# pchisq change needs to be specified with 2 df rather than 1 as in previous comparisons.
+1-pchisq(chi2, 2)
+
+AIC(model1.1old, model1.2old, model1.3old, model1.4old)
+AIC(model1.1new, model1.2new, model1.3new, model1.4new)
+```
+
+For the new period, model1.4 seems to be the best model, but not for the old period (where model1.3 is the best one).
+
+## Extract BLUPs from model1.4 (linear random regression mixed model)
+
+BLUPs represent the response of a given id to the fixed effect of temperature as the difference between that id’s predicted response and the population-level average predicted response. Here, we calculate and plot BLUPs for ranking plasticity.
+
+```{r BLUPs_per9}
+id_blups_old <- ranef(model1.4old)$`id`
+id_blups_new <- ranef(model1.4new)$`id`
+id_index_old <- as.factor(c(1:64))
+id_index_new <- as.factor(c(1:99))
+id_data_old  <- cbind(id_index_old, id_blups_old)
+id_data_new  <- cbind(id_index_new, id_blups_new)
+colnames(id_data_old) <- c("id", "BLUP_int", "BLUP_slope")
+colnames(id_data_new) <- c("id", "BLUP_int", "BLUP_slope")
+id_data_oldnew<-rbind(id_data_old,id_data_new)
+id_data_oldnew<-id_data_oldnew%>%
+  rownames_to_column()%>%
+  select(rowname,BLUP_int,BLUP_slope)%>%
+  rename(id = rowname)%>%
+  mutate(period=ifelse(grepl("old",id),"old","new"))
+with(id_data_oldnew,cor(BLUP_int,BLUP_slope)) # highly correlated!
+with(subset(id_data_oldnew,period=="old"),cor(BLUP_int,BLUP_slope)) # correlated!
+with(subset(id_data_oldnew,period=="new"),cor(BLUP_int,BLUP_slope)) # highly correlated!
+```
+
+```{r BLUPs_per10, echo=FALSE, fig.height=5, fig.width=6}
+ggplot(id_data_oldnew, aes(BLUP_int, BLUP_slope,colour=period)) +
+  geom_point(size = 4, alpha = 0.5) + 
+  ggtitle("BLUPs estimated from different models\nin the two periods") +
+  xlab("BLUP intercept estimate") +
+  ylab("BLUP slope estimate") + my_theme_legend()
+ggplot(id_data_oldnew, aes(BLUP_int, BLUP_slope)) +
+  geom_point(size = 4, alpha = 0.5) + facet_wrap(~period) +
+  ggtitle("BLUPs estimated from different models\nin the two periods") +
+  xlab("BLUP intercept estimate") +
+  ylab("BLUP slope estimate") + my_theme()
+```
+
+# MCMCglmm models (global)
+
+Code based on Arnold et al. 2019 Phil. Trans. R. Soc. B. 
+
+Fitting bivariate models of fitness and FFD, with random regressions for individuals, using a Poisson distribution for fitness, instead of Gaussian (and absolute instead of relative fitness). Using mean April temperature and individuals with at least 5 years of data. Using either mean fitness per year of life or mean fitness per flowering event. Including / not including mean shoot volume over all  years with available data (with an effect on fitness) as a condition variable. 
+
+Data preparation
+
+```{r data prep MCMCglmm}
+data_5yrs_total<-data_5yrs %>%
+  group_by(id)%>%
+  summarise(mean_fitness_life=sum(n_intact_seeds)/mean(n_years_life),
+            # Mean fitness per living year = sum fitness / n years alive 
+            mean_fitness_fl=sum(n_intact_seeds)/mean(n_years_fl))%>%
+  # Mean fitness per fl event = sum fitness / n years when each id flowered
+   arrange(.,id) # Order by id
+
+ # Get values of shoot volume for all ids/years (incl also yrs when not fl)
+shoot_vol<-alldata[c(1,3,14)]%>%
+  arrange(id)%>%                  # Order by id
+  filter(!is.na(shoot_vol))%>%    # Remove NAs
+  filter(id %in% data_5yrs$id)%>%
+  droplevels()
+
+shoot_vol_means<-shoot_vol%>%
+  group_by(id)%>%
+  summarise(shoot_vol_mean=mean(shoot_vol)) # Mean of all available values 
+
+# Join shoot volume data
+(data_5yrs_total<-data_5yrs_total%>%right_join(shoot_vol_means))
+
+ with(data_5yrs_total,cor(mean_fitness_life,mean_fitness_fl))  # Highly correlated
+```
+
+
+## Mean fitness per year of life
+
+### With no condition variable
+
+Stack data:
+
+```{r stack data 1}
+# Create a single data-set "data.stack10", with single column at start
+# to index observations
+data.stack10 <- c()
+data.stack10$Obs <- 1:(163 + 1162)
+data.stack10$id <- c(as.character(data_5yrs_total$id),as.character(data_5yrs$id)) 
+# ids in alphabetical order
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data_5yrs_total$first_yr<-ifelse(grepl("old",as.character(data_5yrs_total$id)),1987,2006)
+
+data.stack10$year <- c(data_5yrs_total$first_yr,
+                     data_5yrs$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack10$temp <- c(rep(0, 163), data_5yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack10$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_life), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack10$traits <- c(rep("fitness", 163), rep("FFD", 1162))
+data.stack10$variable <- data.stack10$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack10$family <- c(rep("poisson", 163), rep("gaussian", 1162))
+data.stack10 <- data.frame(data.stack10)
+
+data.stack10$id <- as.factor(data.stack10$id)
+data.stack10$year <- as.factor(data.stack10$year)
+head(data.stack10)
+```
+
+```{r MCMCglmm models 1, eval=FALSE, include=TRUE}
+# Scaling factor for MCMCglmm iterations
+sc <- 1000 # Increase this parameter for longer runs
+
+priorBiv_RR10 <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE), 
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR10 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack10,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T) 
+# nitt = burnin + thin*(n samples to keep)
+# Aim to store 2000 iterations
+save(modelBV_RR10,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR10.RData")
+```
+
+```{r MCMCglmm models 2}
+kable(summary(modelBV_RR10)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 3}
+kable(summary(modelBV_RR10)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 4}
+kable(summary(modelBV_RR10)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 5}
+kable(diag(autocorr(modelBV_RR10$Sol)[2, , ]),caption="Autocorrelation")
+kable(diag(autocorr(modelBV_RR10$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 6, fig.height=2.5, fig.width=6}
+cor_BV_RR_10_intslope <- 
+  modelBV_RR10$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR10$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR10$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_10_intslope)
+posterior.mode(cor_BV_RR_10_intslope)
+HPDinterval(cor_BV_RR_10_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 7, fig.height=2.5, fig.width=6}
+cor_BV_RR_10_intfit <-
+  modelBV_RR10$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR10$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR10$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_10_intfit)
+posterior.mode(cor_BV_RR_10_intfit)
+HPDinterval(cor_BV_RR_10_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 8, fig.height=2.5, fig.width=6}
+cor_BV_RR_10_slopefit <- 
+  modelBV_RR10$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR10$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR10$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_10_slopefit)
+posterior.mode(cor_BV_RR_10_slopefit)
+HPDinterval(cor_BV_RR_10_slopefit)
+```
+
+Intercepts and slopes of RNs are positively correlated: Plants that flower earlier on average are also more responsive to temperature. Fitness is negatively correlated with both the intercept and the slope of the RN: When temperature increases, individuals that flower earlier on average and are more responsive to temperature have higher fitness (is this really what the results indicate?). 
+
+#### Extract selection coefficients
+
+Selection differentials or gradients should be calculated using relative fitness, and models are typically fitted assuming Gaussian errors. However, where the fitness measure follows a non-Gaussian distribution, as is typically the case with skewed distributions of fitness, a GLMM of absolute fitness will be preferable. The resulting covariances returned by the model will then be between the trait on the data scale and fitness on a ‘latent’ (link-function) scale. These estimates need to be transformed if data-scale estimates of selection are required. However, in the case of a GLMM with a log-link function (e.g. Poisson, over-dispersed Poisson, or negative binomial distribution), it is possible to exploit the fact that the latent-scale covariance with absolute fitness is equivalent to the data-scale covariance of relative fitness: consequently, and conveniently, the covariance components of Pind on the latent scale can simply be treated as selection differentials S. By extension, estimates of b as indicated above will also provide data-scale selection gradients.
+
+```{r selcoefs 1, fig.height=2.5, fig.width=6}
+# Extract 3x3 matrix of variance-covariance values for intercepts and slopes 
+# of temp, and fitness 
+# These are in the 2nd-10th columns of model output
+P.modelBV_RR10 <- modelBV_RR10$VCV[,2:10]         
+P.modelBV_RR10.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR10.mode[k] <- posterior.mode(P.modelBV_RR10[,k])
+P.modelBV_RR10.mode
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR10 <- modelBV_RR10$VCV[, c(4,7)]
+S.modelBV_RR10 <- P.modelBV_RR10[, c(3,6)] # This is exactly the same as above
+colnames(S.modelBV_RR10) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR10.mode <- P.modelBV_RR10.mode[1:2, 3]
+S.modelBV_RR10.mode
+posterior.mode(mcmc(S.modelBV_RR10)) # This is exactly the same as above
+HPDinterval(mcmc(S.modelBV_RR10))
+
+# Plot posterior distribution of selection differentials
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR10[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR10[,2]), main = "S_slopes")
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+n <- length(modelBV_RR10$VCV[,2])   # sample size
+beta_post_RR10 <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3[k] <- P.modelBV_RR10[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR10[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+# Finally, extract and plot the selection gradients posterior modes 
+# and 95% credible intervals for both selection on intercepts (trait value) 
+# and slopes (trait plasticity).
+# Note that credible intervals are not exactly confidence intervals. See here:
+# https://statsdirect.com/help/basics/confidence_interval.htm and
+# https://stats.stackexchange.com/questions/2272/
+
+colnames(beta_post_RR10) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR10))
+HPDinterval(mcmc(beta_post_RR10))
+
+# Plot posterior distribution of selection gradients
+par(mfrow = c(1,2))
+plot(density(beta_post_RR10[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR10[,2]), main = "beta_slopes")
+
+# NB selection differentials and gradients here are from covariances 
+# with latent-scale absolute fitness
+# These are equivalent to covariances with data-scale relative fitness:
+# see main text of paper
+```
+
+The selection differentials are "significant" for both RN intercepts and slopes, but the selection gradients are not "significant" for any of them. This means that, there is significant total selection (direct + indirect) on intercepts and slopes, but after correcting for the covariance between them, there is no direct selection on any of them.
+
+### With shoot volume
+
+Stack data:
+
+```{r stack data 3}
+# Create a single data-set "data.stack14", with single column at start
+# to index observations
+data.stack14 <- c()
+data.stack14$Obs <- 1:(163 + 1162)
+data.stack14$id <- c(as.character(data_5yrs_total$id),as.character(data_5yrs$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack14$year <- c(data_5yrs_total$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack14$temp <- c(rep(0, 163), data_5yrs$cmean_4)
+
+# Shoot volume column is only relevant for fitness, but is set to 0 for FFD values
+# Using log of mean shoot volume over all years when available, centered
+data_5yrs_total<-data_5yrs_total%>%
+  mutate(shoot_vol_mean_log=log(shoot_vol_mean),
+         cn_shoot_vol_mean_log=scale(shoot_vol_mean_log,center=T,scale=F))
+data.stack14$cn_shoot_vol <- c(data_5yrs_total$cn_shoot_vol_mean_log,rep(0, 1162))
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack14$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_life), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack14$traits <- c(rep("fitness", 163), rep("FFD", 1162))
+data.stack14$variable <- data.stack14$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack14$family <- c(rep("poisson", 163), rep("gaussian", 1162))
+data.stack14 <- data.frame(data.stack14)
+
+data.stack14$id <- as.factor(data.stack14$id)
+data.stack14$year <- as.factor(data.stack14$year)
+head(data.stack14)
+```
+
+```{r MCMCglmm models 17, eval=FALSE, include=TRUE}
+modelBV_RR14 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp +  # single fixed effect of temp 
+                           at.level(variable,"fitness"):cn_shoot_vol, 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack14,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+save(modelBV_RR14,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR14.RData")
+```
+
+```{r MCMCglmm models 18}
+kable(summary(modelBV_RR14)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 19}
+kable(summary(modelBV_RR14)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 20}
+kable(summary(modelBV_RR14)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 21}
+kable(diag(autocorr(modelBV_RR14$Sol)[2, , ]),caption="Autocorrelation")
+kable(diag(autocorr(modelBV_RR14$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 22, fig.height=2.5, fig.width=6}
+cor_BV_RR_14_intslope <- 
+  modelBV_RR14$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR14$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR14$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_14_intslope)
+posterior.mode(cor_BV_RR_14_intslope)
+HPDinterval(cor_BV_RR_14_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 23, fig.height=2.5, fig.width=6}
+cor_BV_RR_14_intfit <-
+  modelBV_RR14$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR14$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR14$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_14_intfit)
+posterior.mode(cor_BV_RR_14_intfit)
+HPDinterval(cor_BV_RR_14_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 24, fig.height=2.5, fig.width=6}
+cor_BV_RR_14_slopefit <- 
+  modelBV_RR14$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR14$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR14$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_14_slopefit)
+posterior.mode(cor_BV_RR_14_slopefit)
+HPDinterval(cor_BV_RR_14_slopefit)
+```
+
+Intercepts and slopes of RNs are positively correlated: Plants that flower earlier on average are also more responsive to temperature. Fitness is not correlated with either the intercept or the slope of the RN: There is no selection on either the intercept or the slope of the RN when including plant size as a condition variable. 
+
+#### Extract selection coefficients
+
+```{r selcoefs 3, fig.height=2.5, fig.width=6}
+P.modelBV_RR14 <- modelBV_RR14$VCV[,2:10]         
+P.modelBV_RR14.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR14.mode[k] <- posterior.mode(P.modelBV_RR14[,k])
+P.modelBV_RR14.mode
+
+S.modelBV_RR14 <- modelBV_RR14$VCV[, c(4,7)]
+S.modelBV_RR14 <- P.modelBV_RR14[, c(3,6)]
+colnames(S.modelBV_RR14) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR14.mode <- P.modelBV_RR14.mode[1:2, 3]
+S.modelBV_RR14.mode
+posterior.mode(mcmc(S.modelBV_RR14))
+HPDinterval(mcmc(S.modelBV_RR14))
+
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR14[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR14[,2]), main = "S_slopes")
+
+n <- length(modelBV_RR14$VCV[,2])   # sample size
+beta_post_RR14 <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  
+  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR14[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR14[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR14) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR14))
+HPDinterval(mcmc(beta_post_RR14))
+
+par(mfrow = c(1,2))
+plot(density(beta_post_RR14[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR14[,2]), main = "beta_slopes")
+```
+
+The selection differentials and gradients are not "significant" for either RN intercepts or slopes. This means that there no significant selection (either direct or indirect) on intercepts and slopes of the RNs.
+
+## Mean fitness per flowering event
+
+### With no condition variable
+
+Stack data:
+
+```{r stack data 4}
+# Create a single data-set "data.stack12", with single column at start 
+# to index observations
+data.stack12 <- c()
+data.stack12$Obs <- 1:(163 + 1162)
+data.stack12$id <- c(as.character(data_5yrs_total$id),as.character(data_5yrs$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack12$year <- c(data_5yrs_total$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack12$temp <- c(rep(0, 163), data_5yrs$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack12$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_fl), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack12$traits <- c(rep("fitness", 163), rep("FFD", 1162))
+data.stack12$variable <- data.stack12$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack12$family <- c(rep("poisson", 163), rep("gaussian", 1162))
+data.stack12 <- data.frame(data.stack12)
+
+data.stack12$id <- as.factor(data.stack12$id)
+data.stack12$year <- as.factor(data.stack12$year)
+head(data.stack12)
+```
+
+```{r MCMCglmm models 25, eval=FALSE, include=TRUE}
+modelBV_RR12 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack12,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+save(modelBV_RR12,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR12.RData")
+```
+
+```{r MCMCglmm models 26}
+kable(summary(modelBV_RR12)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 27}
+kable(summary(modelBV_RR12)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 28}
+kable(summary(modelBV_RR12)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 29}
+kable(diag(autocorr(modelBV_RR12$Sol)[2, , ]),caption="Autocorrelation")
+kable(diag(autocorr(modelBV_RR12$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 30, fig.height=2.5, fig.width=6}
+cor_BV_RR_12_intslope <- 
+  modelBV_RR12$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR12$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR12$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_12_intslope)
+posterior.mode(cor_BV_RR_12_intslope)
+HPDinterval(cor_BV_RR_12_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 32, fig.height=2.5, fig.width=6}
+cor_BV_RR_12_intfit <-
+  modelBV_RR12$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR12$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR12$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_12_intfit)
+posterior.mode(cor_BV_RR_12_intfit)
+HPDinterval(cor_BV_RR_12_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 33, fig.height=2.5, fig.width=6}
+cor_BV_RR_12_slopefit <- 
+  modelBV_RR12$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR12$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR12$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_12_slopefit)
+posterior.mode(cor_BV_RR_12_slopefit)
+HPDinterval(cor_BV_RR_12_slopefit)
+```
+
+Intercepts and slopes of RNs are positively correlated: Plants that flower earlier on average are also more responsive to temperature. Fitness is negatively correlated with both the intercept and the slope of the RN: When temperature increases, individuals that flower earlier on average and are more responsive to temperature have higher fitness (is this really what the results indicate?).
+
+#### Extract selection coefficients
+
+```{r selcoefs 4, fig.height=2.5, fig.width=6}
+P.modelBV_RR12 <- modelBV_RR12$VCV[,2:10]         
+P.modelBV_RR12.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR12.mode[k] <- posterior.mode(P.modelBV_RR12[,k])
+P.modelBV_RR12.mode
+
+S.modelBV_RR12 <- modelBV_RR12$VCV[, c(4,7)]
+S.modelBV_RR12 <- P.modelBV_RR12[, c(3,6)]
+colnames(S.modelBV_RR12) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR12.mode <- P.modelBV_RR12.mode[1:2, 3]
+S.modelBV_RR12.mode
+posterior.mode(mcmc(S.modelBV_RR12))
+HPDinterval(mcmc(S.modelBV_RR12))
+
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR12[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR12[,2]), main = "S_slopes")
+
+n <- length(modelBV_RR12$VCV[,2])   # sample size
+beta_post_RR12 <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  
+  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR12[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR12[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR12) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR12))
+HPDinterval(mcmc(beta_post_RR12))
+
+par(mfrow = c(1,2))
+plot(density(beta_post_RR12[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR12[,2]), main = "beta_slopes")
+```
+
+The selection differential is "significant" for RN intercepts but not for RN slopes. The selection gradients are not "significant" for any of them. This means that, there is significant total selection (direct + indirect) on intercepts of the RN, but after correcting for the covariance with slopes, there is no direct selection on any of them. There is no significant selection (either direct or indirect) on slopes of the RNs.
+
+### With shoot volume
+
+Stack data:
+
+```{r stack data 6}
+# Create a single data-set "data.stack15", with single column at start 
+# to index observations
+data.stack15 <- c()
+data.stack15$Obs <- 1:(163 + 1162)
+data.stack15$id <- c(as.character(data_5yrs_total$id),as.character(data_5yrs$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data.stack15$year <- c(data_5yrs_total$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack15$temp <- c(rep(0, 163), data_5yrs$cmean_4)
+
+# Shoot volume column is only relevant for fitness, but is set to 0 for FFD values
+# Using log of mean shoot volume over all years when available, centered
+data.stack15$cn_shoot_vol <- c(data_5yrs_total$cn_shoot_vol_mean_log,rep(0, 1162))
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack15$fitness.FFD.stack <- c(round(data_5yrs_total$mean_fitness_fl), data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack15$traits <- c(rep("fitness", 163), rep("FFD", 1162))
+data.stack15$variable <- data.stack15$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack15$family <- c(rep("poisson", 163), rep("gaussian", 1162))
+data.stack15 <- data.frame(data.stack15)
+
+data.stack15$id <- as.factor(data.stack15$id)
+data.stack15$year <- as.factor(data.stack15$year)
+head(data.stack15)
+```
+
+```{r MCMCglmm models 42, eval=FALSE, include=TRUE}
+modelBV_RR15 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp +  # single fixed effect of temp 
+                           at.level(variable,"fitness"):cn_shoot_vol, 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack15,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+save(modelBV_RR15,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR15.RData")
+```
+
+```{r MCMCglmm models 43}
+kable(summary(modelBV_RR15)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 44}
+kable(summary(modelBV_RR15)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 45}
+kable(summary(modelBV_RR15)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 46}
+kable(diag(autocorr(modelBV_RR15$Sol)[2, , ]),caption="Autocorrelation")
+kable(diag(autocorr(modelBV_RR15$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 47, fig.height=2.5, fig.width=6}
+cor_BV_RR_15_intslope <- 
+  modelBV_RR15$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR15$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR15$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_15_intslope)
+posterior.mode(cor_BV_RR_15_intslope)
+HPDinterval(cor_BV_RR_15_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 48, fig.height=2.5, fig.width=6}
+cor_BV_RR_15_intfit <-
+  modelBV_RR15$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR15$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR15$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_15_intfit)
+posterior.mode(cor_BV_RR_15_intfit)
+HPDinterval(cor_BV_RR_15_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 49, fig.height=2.5, fig.width=6}
+cor_BV_RR_15_slopefit <- 
+  modelBV_RR15$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR15$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR15$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_15_slopefit)
+posterior.mode(cor_BV_RR_15_slopefit)
+HPDinterval(cor_BV_RR_15_slopefit)
+```
+
+Intercepts and slopes of RNs are positively correlated: Plants that flower earlier on average are also more responsive to temperature. Fitness is not correlated with either the intercept or the slope of the RN: There is no selection on either the intercept or the slope of the RN when including plant size as a condition variable. 
+
+#### Extract selection coefficients
+
+```{r selcoefs 6, fig.height=2.5, fig.width=6}
+P.modelBV_RR15 <- modelBV_RR15$VCV[,2:10]         
+P.modelBV_RR15.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR15.mode[k] <- posterior.mode(P.modelBV_RR15[,k])
+P.modelBV_RR15.mode
+
+S.modelBV_RR15 <- modelBV_RR15$VCV[, c(4,7)]
+S.modelBV_RR15 <- P.modelBV_RR15[, c(3,6)]
+colnames(S.modelBV_RR15) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR15.mode <- P.modelBV_RR15.mode[1:2, 3]
+S.modelBV_RR15.mode
+posterior.mode(mcmc(S.modelBV_RR15))
+HPDinterval(mcmc(S.modelBV_RR15))
+
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR15[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR15[,2]), main = "S_slopes")
+
+n <- length(modelBV_RR15$VCV[,2])   # sample size
+beta_post_RR15 <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  
+  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR15[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR15[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR15) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR15))
+HPDinterval(mcmc(beta_post_RR15))
+
+par(mfrow = c(1,2))
+plot(density(beta_post_RR15[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR15[,2]), main = "beta_slopes")
+```
+
+The selection differentials and gradients are not "significant" for either RN intercepts or slopes. This means that there no significant selection (either direct or indirect) on intercepts and slopes of the RNs.
+
+# Correlation among size and RN parameters
+
+There is no selection on RN parameters when including plant size as a condition variable. Selection on plasticity might be mediated by the resource state of the plants - this might be indicated by a correlation among plant size and the parameters of the RN. We check this by looking at correlations among plant size (shoot volume) and the BLUPs for intercept and slope of the RN (NOTE: this is maybe not a good use of BLUPs because they do not have associated measures of uncertainty!).
+
+```{r cor size RN pars 1}
+BLUPs<-id_data%>%
+  rownames_to_column()%>%
+  select(rowname,BLUP_int,BLUP_slope)%>%
+  rename(id = rowname)%>%
+  right_join(shoot_vol_means)%>%
+  mutate(period=ifelse(grepl("old",id),"old","new"))
+
+with(BLUPs,cor.test(shoot_vol_mean,BLUP_int))  # -0.3671608*
+summary(lm(BLUP_int~shoot_vol_mean,BLUPs))
+summary(lm(BLUP_int~log(shoot_vol_mean),BLUPs))
+
+with(BLUPs,cor.test(shoot_vol_mean,BLUP_slope))  # -0.3781924*
+summary(lm(BLUP_slope~shoot_vol_mean,BLUPs))
+summary(lm(BLUP_slope~log(shoot_vol_mean),BLUPs))
+
+# Old period
+with(subset(BLUPs,period=="old"),cor.test(shoot_vol_mean,BLUP_int))  # NS
+summary(lm(BLUP_int~shoot_vol_mean,subset(BLUPs,period=="old")))
+summary(lm(BLUP_int~log(shoot_vol_mean),subset(BLUPs,period=="old")))
+
+with(subset(BLUPs,period=="old"),cor.test(shoot_vol_mean,BLUP_slope))  # NS
+summary(lm(BLUP_slope~shoot_vol_mean,subset(BLUPs,period=="old")))
+summary(lm(BLUP_slope~log(shoot_vol_mean),subset(BLUPs,period=="old")))
+
+# New period
+with(subset(BLUPs,period=="new"),cor.test(shoot_vol_mean,BLUP_int))  # -0.4425795*
+summary(lm(BLUP_int~shoot_vol_mean,subset(BLUPs,period=="new")))
+summary(lm(BLUP_int~log(shoot_vol_mean),subset(BLUPs,period=="new")))
+
+with(subset(BLUPs,period=="new"),cor.test(shoot_vol_mean,BLUP_slope))  # -0.448708*
+summary(lm(BLUP_slope~shoot_vol_mean,subset(BLUPs,period=="new")))
+summary(lm(BLUP_slope~log(shoot_vol_mean),subset(BLUPs,period=="new")))
+```
+
+```{r cor size RN pars 2, echo=FALSE, fig.height=4, fig.width=9}
+grid.arrange(
+  ggplot(BLUPs,aes(log(shoot_vol_mean),BLUP_int))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ggplot(BLUPs,aes(log(shoot_vol_mean),BLUP_slope))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ncol=2)
+grid.arrange(
+  ggplot(BLUPs,aes(sqrt(shoot_vol_mean),BLUP_int))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ggplot(BLUPs,aes(sqrt(shoot_vol_mean),BLUP_slope))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ncol=2)
+grid.arrange(
+  ggplot(BLUPs,aes(log(shoot_vol_mean),BLUP_int,color=period))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ggplot(BLUPs,aes(log(shoot_vol_mean),BLUP_slope,color=period))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ncol=2)
+grid.arrange(
+  ggplot(BLUPs,aes(sqrt(shoot_vol_mean),BLUP_int,color=period))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ggplot(BLUPs,aes(sqrt(shoot_vol_mean),BLUP_slope,color=period))+
+    geom_point()+geom_smooth(method="lm")+my_theme(),
+  ncol=2)
+```
+
+There is a significant negative correlation among size and RN elevation and slope, meaning that larger plants have lower elevations (i.e. flower earlier on average) and slopes (i.e. are more responsive to temperature).
+
+When looking at both periods separately, the correlation is significant only in the "new" period.
+
+Some graphs for BLUPs showing the size of individuals:
+
+```{r BLUPs_all23, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(BLUPs, aes(id, BLUP_int)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4))
+ggplot(subset(BLUPs,period=="old"), aes(id, BLUP_int)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4)) + ggtitle("Old period")
+ggplot(subset(BLUPs,period=="new"), aes(id, BLUP_int)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4)) + ggtitle("New period")
+```
+
+```{r BLUPs_all24, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(BLUPs, aes(id, BLUP_slope)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP slope estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4))
+ggplot(subset(BLUPs,period=="old"), aes(id, BLUP_slope)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP slope estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4)) + ggtitle("Old period")
+ggplot(subset(BLUPs,period=="new"), aes(id, BLUP_slope)) + 
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)),alpha = 0.6) + 
+  ylab("BLUP slope estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme_legend() +
+  theme(axis.text.x = element_blank()) +
+  scale_size_continuous(range = c(1, 10))+
+  scale_colour_gradientn(colours=rainbow(4)) +ggtitle("New period")
+```
+
+```{r BLUPs_all25, echo=FALSE, fig.height=6, fig.width=10}
+ggplot(BLUPs, aes(BLUP_int, BLUP_slope)) +
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)), alpha = 0.4) +
+    xlab("BLUP intercept estimate") + ylab("BLUP slope estimate") + my_theme_legend() +
+  scale_size_continuous(range = c(1, 10))+ scale_colour_gradientn(colours=rainbow(4)) 
+ggplot(subset(BLUPs,period=="old"), aes(BLUP_int, BLUP_slope)) +
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)), alpha = 0.4) +
+    xlab("BLUP intercept estimate") + ylab("BLUP slope estimate") + my_theme_legend() +
+  scale_size_continuous(range = c(1, 10))+ scale_colour_gradientn(colours=rainbow(4)) +
+  ggtitle("Old period")
+ggplot(subset(BLUPs,period=="new"), aes(BLUP_int, BLUP_slope)) +
+  geom_point(aes(size = log(shoot_vol_mean),colour = log(shoot_vol_mean)), alpha = 0.4) +
+    xlab("BLUP intercept estimate") +  ylab("BLUP slope estimate") + my_theme_legend() +
+  scale_size_continuous(range = c(1, 10))+ scale_colour_gradientn(colours=rainbow(4))+
+  ggtitle("New period")
+```
+
+```{r BLUPs_all26, echo=FALSE, fig.height=4, fig.width=12}
+BLUPs<-BLUPs%>%
+  mutate(ranking = rank(BLUP_slope))
+ggplot(BLUPs, aes(ranking, BLUP_slope)) +
+  geom_bar(stat = "identity", aes(fill = log(shoot_vol_mean)))  +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  scale_fill_gradientn(colours=rainbow(4)) +
+  my_theme_legend() + theme(axis.text.x = element_blank())
+ggplot(subset(BLUPs,period=="old"), aes(ranking, BLUP_slope)) +
+  geom_bar(stat = "identity", aes(fill = log(shoot_vol_mean)))  +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  scale_fill_gradientn(colours=rainbow(4)) + ggtitle("Old period") +
+  my_theme_legend() + theme(axis.text.x = element_blank())
+ggplot(subset(BLUPs,period=="new"), aes(ranking, BLUP_slope)) +
+  geom_bar(stat = "identity", aes(fill = log(shoot_vol_mean)))  +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  scale_fill_gradientn(colours=rainbow(4)) + ggtitle("Old period") +
+  my_theme_legend() + theme(axis.text.x = element_blank())
+```
+
+Plant size is significantly correlated with the BLUPs for elevation and slope: this might indicate that selection on RN parameters might be mediated by the resource state of the plants.
+
+When looking at both periods separately, plant size is only significantly correlated with the BLUPs for elevation and slope in the "new" period.
+
+Plot of all the RNs coloured by size:
+
+```{r BLUPs_all27, echo=FALSE, fig.height=12, fig.width=14, message=FALSE, warning=FALSE}
+data_5yrs_shoot<-data_5yrs%>%
+  right_join(data_5yrs_total[c(1,4)])%>%
+  mutate(period=ifelse(grepl("old",id),"old","new"))
+ggplot(data_5yrs_shoot,aes(x=cmean_4,y=FFD,group=id))+
+  geom_smooth(method=lm,se=F,size=0.7,aes(colour = log(shoot_vol_mean)))+
+  xlab("Mean.centred mean daily temperature April")+
+  ylab("First flowering date")+my_theme_legend() +
+  scale_colour_gradientn(colours=rainbow(4))
+ggplot(subset(data_5yrs_shoot,period=="old"),aes(x=cmean_4,y=FFD,group=id))+
+  geom_smooth(method=lm,se=F,size=0.7,aes(colour = log(shoot_vol_mean)))+
+  xlab("Mean.centred mean daily temperature April")+
+  ylab("First flowering date")+my_theme_legend() +
+  scale_colour_gradientn(colours=rainbow(4)) + ggtitle("Old period")
+ggplot(subset(data_5yrs_shoot,period=="new"),aes(x=cmean_4,y=FFD,group=id))+
+  geom_smooth(method=lm,se=F,size=0.7,aes(colour = log(shoot_vol_mean)))+
+  xlab("Mean.centred mean daily temperature April")+
+  ylab("First flowering date")+my_theme_legend() +
+  scale_colour_gradientn(colours=rainbow(4)) + ggtitle("New period")
+```
+
+# Differences in size between the two periods
+
+```{r diffsize 1, echo=FALSE, message=FALSE, warning=FALSE}
+BLUPs_summ <- summarySE(BLUPs, measurevar="shoot_vol_mean", groupvars=c("period"))
+ggplot(BLUPs_summ, aes(x=period, y=shoot_vol_mean)) + 
+    geom_errorbar(aes(ymin=shoot_vol_mean-se, ymax=shoot_vol_mean+se), width=.1) +
+    geom_line() + geom_point() +  my_theme()
+BLUPs$shoot_vol_mean_log<-log(BLUPs$shoot_vol_mean)
+```
+
+```{r diffsize 2}
+with(BLUPs,summary(lm(shoot_vol_mean~period)))
+with(BLUPs,Anova(lm(shoot_vol_mean~period)))
+```
+
+
+# MCMCglmm models (two periods)
+
+## Mean fitness per year of life
+
+### With no condition variable
+
+#### Stack data old period
+
+```{r stack data 7}
+data_5yrs_total<-data_5yrs_total%>%
+  mutate(period=ifelse(grepl("old",id),"old","new"))
+# Create a single data-set "data.stack.oldA", with single column at start
+# to index observations
+data.stack.oldA <- c()
+data.stack.oldA$Obs <- 1:(64 + 392)
+data.stack.oldA$id <- c(as.character(subset(data_5yrs_total,period=="old")$id),
+                        as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.oldA$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.oldA$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack.oldA$fitness.FFD.stack <- 
+  c(round(subset(data_5yrs_total,period=="old")$mean_fitness_life),
+    subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.oldA$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.oldA$variable <- data.stack.oldA$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.oldA$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.oldA <- data.frame(data.stack.oldA)
+
+data.stack.oldA$id <- as.factor(data.stack.oldA$id)
+data.stack.oldA$year <- as.factor(data.stack.oldA$year)
+head(data.stack.oldA)
+```
+
+#### Stack data new period
+
+```{r stack data 8}
+# Create a single data-set "data.stack.newA", with single column at start
+# to index observations
+data.stack.newA <- c()
+data.stack.newA$Obs <- 1:(99 + 770)
+data.stack.newA$id <- c(as.character(subset(data_5yrs_total,period=="new")$id),
+                        as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.newA$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.newA$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES), then FFD values:
+data.stack.newA$fitness.FFD.stack <- 
+  c(round(subset(data_5yrs_total,period=="new")$mean_fitness_life),
+    subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.newA$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.newA$variable <- data.stack.newA$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.newA$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.newA <- data.frame(data.stack.newA)
+
+data.stack.newA$id <- as.factor(data.stack.newA$id)
+data.stack.newA$year <- as.factor(data.stack.newA$year)
+head(data.stack.newA)
+```
+
+#### Fit model old period
+
+```{r MCMCglmm models 50, eval=FALSE, include=TRUE}
+# Scaling factor for MCMCglmm iterations
+sc <- 1000 # Increase this parameter for longer runs
+modelBV_RR_oldA <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.oldA,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T) 
+# nitt = burnin + thin*(n samples to keep)
+# Aim to store 2000 iterations
+save(modelBV_RR_oldA,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_oldA.RData")
+```
+
+#### Fit model new period
+
+```{r MCMCglmm models 51, eval=FALSE, include=TRUE}
+modelBV_RR_newA <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.newA,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T) 
+save(modelBV_RR_newA,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_newA.RData")
+```
+
+#### Results old period
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 52, fig.height=2.5, fig.width=6}
+cor_BV_RR_oldA_intslope <- 
+  modelBV_RR_oldA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_oldA_intslope)
+posterior.mode(cor_BV_RR_oldA_intslope)
+HPDinterval(cor_BV_RR_oldA_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 53, fig.height=2.5, fig.width=6}
+cor_BV_RR_oldA_intfit <-
+  modelBV_RR_oldA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_oldA_intfit)
+posterior.mode(cor_BV_RR_oldA_intfit)
+HPDinterval(cor_BV_RR_oldA_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 54, fig.height=2.5, fig.width=6}
+cor_BV_RR_oldA_slopefit <- 
+  modelBV_RR_oldA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_oldA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_oldA_slopefit)
+posterior.mode(cor_BV_RR_oldA_slopefit)
+HPDinterval(cor_BV_RR_oldA_slopefit)
+```
+
+#### Results new period
+
+Among-individual correlation between intercepts and slopes for FFD:
+
+```{r MCMCglmm models 55, fig.height=2.5, fig.width=6}
+cor_BV_RR_newA_intslope <- 
+  modelBV_RR_newA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_newA_intslope)
+posterior.mode(cor_BV_RR_newA_intslope)
+HPDinterval(cor_BV_RR_newA_intslope) 
+```
+
+Among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 56, fig.height=2.5, fig.width=6}
+cor_BV_RR_newA_intfit <-
+  modelBV_RR_newA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_newA_intfit)
+posterior.mode(cor_BV_RR_newA_intfit)
+HPDinterval(cor_BV_RR_newA_intfit)
+```
+
+Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 57, fig.height=2.5, fig.width=6}
+cor_BV_RR_newA_slopefit <- 
+  modelBV_RR_newA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_newA$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_newA_slopefit)
+posterior.mode(cor_BV_RR_newA_slopefit)
+HPDinterval(cor_BV_RR_newA_slopefit)
+```
+
+#### Extract selection coefficients old period
+#### Extract selection coefficients new period
+
+# MCMCglmm models (yearly)
+
+Data preparation
+
+```{r data prep yearly models}
+data_5yrs$period<-ifelse(grepl("old",as.character(data_5yrs$id)),"old","new")
+data_5yrs_total$period<-ifelse(grepl("old",as.character(data_5yrs_total$id)),"old","new")
+data_5yrs_old<-spread(subset(data_5yrs,period=="old")[c(1,2,6,18)], 
+                      year, n_intact_seeds)%>%
+  rename_at(vars(-id,-period),function(x) paste0("fitness_",x))%>%
+  replace(., is.na(.), 0)%>%
+  arrange(.,id) # Order by id
+data_5yrs_new<-spread(subset(data_5yrs,period=="new")[c(1,2,6,18)], 
+                      year, n_intact_seeds)%>%
+  rename_at(vars(-id,-period),function(x) paste0("fitness_",x))%>%
+  replace(., is.na(.), 0)%>%
+  arrange(.,id) # Order by id
+data_5yrs_old$id<-droplevels(data_5yrs_old$id)
+data_5yrs_new$id<-droplevels(data_5yrs_new$id)
+length(levels(data_5yrs_old$id)) # 64 id for old period
+length(levels(data_5yrs_new$id)) # 99 ids for new period
+```
+
+## With no condition variable
+
+### Stack data
+
+```{r stack data a}
+# Create a single data-set "data.stack.1987a", with single column at start to index observations
+data.stack.1987a <- c()
+data.stack.1987a$Obs <- 1:(64 + 392)
+data.stack.1987a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1987a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1987a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1987a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1987),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1987a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1987a$variable <- data.stack.1987a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1987a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1987a <- data.frame(data.stack.1987a)
+
+data.stack.1987a$id <- as.factor(data.stack.1987a$id)
+data.stack.1987a$year <- as.factor(data.stack.1987a$year)
+head(data.stack.1987a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1988a", with single column at start to index observations
+data.stack.1988a <- c()
+data.stack.1988a$Obs <- 1:(64 + 392)
+data.stack.1988a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1988a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1988a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1988a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1988),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1988a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1988a$variable <- data.stack.1988a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1988a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1988a <- data.frame(data.stack.1988a)
+
+data.stack.1988a$id <- as.factor(data.stack.1988a$id)
+data.stack.1988a$year <- as.factor(data.stack.1988a$year)
+head(data.stack.1988a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1989a", with single column at start to index observations
+data.stack.1989a <- c()
+data.stack.1989a$Obs <- 1:(64 + 392)
+data.stack.1989a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1989a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1989a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1989a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1989),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1989a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1989a$variable <- data.stack.1989a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1989a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1989a <- data.frame(data.stack.1989a)
+
+data.stack.1989a$id <- as.factor(data.stack.1989a$id)
+data.stack.1989a$year <- as.factor(data.stack.1989a$year)
+head(data.stack.1989a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1990a", with single column at start to index observations
+data.stack.1990a <- c()
+data.stack.1990a$Obs <- 1:(64 + 392)
+data.stack.1990a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1990a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1990a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1990a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1990),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1990a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1990a$variable <- data.stack.1990a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1990a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1990a <- data.frame(data.stack.1990a)
+
+data.stack.1990a$id <- as.factor(data.stack.1990a$id)
+data.stack.1990a$year <- as.factor(data.stack.1990a$year)
+head(data.stack.1990a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1991a", with single column at start to index observations
+data.stack.1991a <- c()
+data.stack.1991a$Obs <- 1:(64 + 392)
+data.stack.1991a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1991a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1991a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1991a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1991),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1991a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1991a$variable <- data.stack.1991a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1991a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1991a <- data.frame(data.stack.1991a)
+
+data.stack.1991a$id <- as.factor(data.stack.1991a$id)
+data.stack.1991a$year <- as.factor(data.stack.1991a$year)
+head(data.stack.1991a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1992a", with single column at start to index observations
+data.stack.1992a <- c()
+data.stack.1992a$Obs <- 1:(64 + 392)
+data.stack.1992a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1992a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1992a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1992a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1992),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1992a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1992a$variable <- data.stack.1992a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1992a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1992a <- data.frame(data.stack.1992a)
+
+data.stack.1992a$id <- as.factor(data.stack.1992a$id)
+data.stack.1992a$year <- as.factor(data.stack.1992a$year)
+head(data.stack.1992a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1993a", with single column at start to index observations
+data.stack.1993a <- c()
+data.stack.1993a$Obs <- 1:(64 + 392)
+data.stack.1993a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1993a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1993a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1993a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1993),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1993a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1993a$variable <- data.stack.1993a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1993a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1993a <- data.frame(data.stack.1993a)
+
+data.stack.1993a$id <- as.factor(data.stack.1993a$id)
+data.stack.1993a$year <- as.factor(data.stack.1993a$year)
+head(data.stack.1993a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1994a", with single column at start to index observations
+data.stack.1994a <- c()
+data.stack.1994a$Obs <- 1:(64 + 392)
+data.stack.1994a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1994a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1994a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1994a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1994),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1994a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1994a$variable <- data.stack.1994a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1994a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1994a <- data.frame(data.stack.1994a)
+
+data.stack.1994a$id <- as.factor(data.stack.1994a$id)
+data.stack.1994a$year <- as.factor(data.stack.1994a$year)
+head(data.stack.1994a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1995a", with single column at start to index observations
+data.stack.1995a <- c()
+data.stack.1995a$Obs <- 1:(64 + 392)
+data.stack.1995a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1995a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1995a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1995a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1995),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1995a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1995a$variable <- data.stack.1995a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1995a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1995a <- data.frame(data.stack.1995a)
+
+data.stack.1995a$id <- as.factor(data.stack.1995a$id)
+data.stack.1995a$year <- as.factor(data.stack.1995a$year)
+head(data.stack.1995a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.1996a", with single column at start to index observations
+data.stack.1996a <- c()
+data.stack.1996a$Obs <- 1:(64 + 392)
+data.stack.1996a$id <- c(as.character(data_5yrs_old$id),
+                         as.character(subset(data_5yrs,period=="old")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1996a$year <- c(subset(data_5yrs_total,period=="old")$first_yr,
+                          subset(data_5yrs,period=="old")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1996a$temp <- c(rep(0, 64), subset(data_5yrs,period=="old")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.1996a$fitness.FFD.stack <- c(round(data_5yrs_old$fitness_1996),
+                                       subset(data_5yrs,period=="old")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1996a$traits <- c(rep("fitness", 64), rep("FFD", 392))
+data.stack.1996a$variable <- data.stack.1996a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1996a$family <- c(rep("poisson", 64), rep("gaussian", 392))
+data.stack.1996a <- data.frame(data.stack.1996a)
+
+data.stack.1996a$id <- as.factor(data.stack.1996a$id)
+data.stack.1996a$year <- as.factor(data.stack.1996a$year)
+head(data.stack.1996a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2006a", with single column at start to index observations
+data.stack.2006a <- c()
+data.stack.2006a$Obs <- 1:(99 + 770)
+data.stack.2006a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2006a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2006a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2006a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2006),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2006a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2006a$variable <- data.stack.2006a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2006a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2006a <- data.frame(data.stack.2006a)
+
+data.stack.2006a$id <- as.factor(data.stack.2006a$id)
+data.stack.2006a$year <- as.factor(data.stack.2006a$year)
+head(data.stack.2006a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2007a", with single column at start to index observations
+data.stack.2007a <- c()
+data.stack.2007a$Obs <- 1:(99 + 770)
+data.stack.2007a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2007a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2007a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2007a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2007),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2007a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2007a$variable <- data.stack.2007a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2007a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2007a <- data.frame(data.stack.2007a)
+
+data.stack.2007a$id <- as.factor(data.stack.2007a$id)
+data.stack.2007a$year <- as.factor(data.stack.2007a$year)
+head(data.stack.2007a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2008a", with single column at start to index observations
+data.stack.2008a <- c()
+data.stack.2008a$Obs <- 1:(99 + 770)
+data.stack.2008a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2008a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2008a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2008a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2008),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2008a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2008a$variable <- data.stack.2008a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2008a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2008a <- data.frame(data.stack.2008a)
+
+data.stack.2008a$id <- as.factor(data.stack.2008a$id)
+data.stack.2008a$year <- as.factor(data.stack.2008a$year)
+head(data.stack.2008a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2009a", with single column at start to index observations
+data.stack.2009a <- c()
+data.stack.2009a$Obs <- 1:(99 + 770)
+data.stack.2009a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2009a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2009a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2009a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2009),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2009a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2009a$variable <- data.stack.2009a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2009a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2009a <- data.frame(data.stack.2009a)
+
+data.stack.2009a$id <- as.factor(data.stack.2009a$id)
+data.stack.2009a$year <- as.factor(data.stack.2009a$year)
+head(data.stack.2009a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2010a", with single column at start to index observations
+data.stack.2010a <- c()
+data.stack.2010a$Obs <- 1:(99 + 770)
+data.stack.2010a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2010a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2010a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2010a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2010),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2010a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2010a$variable <- data.stack.2010a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2010a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2010a <- data.frame(data.stack.2010a)
+
+data.stack.2010a$id <- as.factor(data.stack.2010a$id)
+data.stack.2010a$year <- as.factor(data.stack.2010a$year)
+head(data.stack.2010a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2011a", with single column at start to index observations
+data.stack.2011a <- c()
+data.stack.2011a$Obs <- 1:(99 + 770)
+data.stack.2011a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2011a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2011a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2011a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2011),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2011a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2011a$variable <- data.stack.2011a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2011a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2011a <- data.frame(data.stack.2011a)
+
+data.stack.2011a$id <- as.factor(data.stack.2011a$id)
+data.stack.2011a$year <- as.factor(data.stack.2011a$year)
+head(data.stack.2011a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2012a", with single column at start to index observations
+data.stack.2012a <- c()
+data.stack.2012a$Obs <- 1:(99 + 770)
+data.stack.2012a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2012a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2012a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2012a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2012),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2012a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2012a$variable <- data.stack.2012a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2012a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2012a <- data.frame(data.stack.2012a)
+
+data.stack.2012a$id <- as.factor(data.stack.2012a$id)
+data.stack.2012a$year <- as.factor(data.stack.2012a$year)
+head(data.stack.2012a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2013a", with single column at start to index observations
+data.stack.2013a <- c()
+data.stack.2013a$Obs <- 1:(99 + 770)
+data.stack.2013a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2013a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2013a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2013a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2013),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2013a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2013a$variable <- data.stack.2013a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2013a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2013a <- data.frame(data.stack.2013a)
+
+data.stack.2013a$id <- as.factor(data.stack.2013a$id)
+data.stack.2013a$year <- as.factor(data.stack.2013a$year)
+head(data.stack.2013a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2014a", with single column at start to index observations
+data.stack.2014a <- c()
+data.stack.2014a$Obs <- 1:(99 + 770)
+data.stack.2014a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2014a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2014a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2014a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2014),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2014a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2014a$variable <- data.stack.2014a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2014a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2014a <- data.frame(data.stack.2014a)
+
+data.stack.2014a$id <- as.factor(data.stack.2014a$id)
+data.stack.2014a$year <- as.factor(data.stack.2014a$year)
+head(data.stack.2014a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2015a", with single column at start to index observations
+data.stack.2015a <- c()
+data.stack.2015a$Obs <- 1:(99 + 770)
+data.stack.2015a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2015a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2015a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2015a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2015),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2015a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2015a$variable <- data.stack.2015a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2015a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2015a <- data.frame(data.stack.2015a)
+
+data.stack.2015a$id <- as.factor(data.stack.2015a$id)
+data.stack.2015a$year <- as.factor(data.stack.2015a$year)
+head(data.stack.2015a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2016a", with single column at start to index observations
+data.stack.2016a <- c()
+data.stack.2016a$Obs <- 1:(99 + 770)
+data.stack.2016a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2016a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2016a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2016a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2016),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2016a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2016a$variable <- data.stack.2016a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2016a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2016a <- data.frame(data.stack.2016a)
+
+data.stack.2016a$id <- as.factor(data.stack.2016a$id)
+data.stack.2016a$year <- as.factor(data.stack.2016a$year)
+head(data.stack.2016a)
+
+#########################################################################################
+
+# Create a single data-set "data.stack.2017a", with single column at start to index observations
+data.stack.2017a <- c()
+data.stack.2017a$Obs <- 1:(99 + 770)
+data.stack.2017a$id <- c(as.character(data_5yrs_new$id),
+                         as.character(subset(data_5yrs,period=="new")$id)) 
+# ids in alphabetical order
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2017a$year <- c(subset(data_5yrs_total,period=="new")$first_yr,
+                          subset(data_5yrs,period=="new")$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2017a$temp <- c(rep(0, 99), subset(data_5yrs,period=="new")$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year,
+# then FFD values:
+data.stack.2017a$fitness.FFD.stack <- c(round(data_5yrs_new$fitness_2017),
+                                       subset(data_5yrs,period=="new")$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2017a$traits <- c(rep("fitness", 99), rep("FFD", 770))
+data.stack.2017a$variable <- data.stack.2017a$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2017a$family <- c(rep("poisson", 99), rep("gaussian", 770))
+data.stack.2017a <- data.frame(data.stack.2017a)
+
+data.stack.2017a$id <- as.factor(data.stack.2017a$id)
+data.stack.2017a$year <- as.factor(data.stack.2017a$year)
+head(data.stack.2017a)
+```
+
+### Run models
+
+```{r MCMCglmm yearly models 1, eval=FALSE, include=TRUE}
+modelBV_RR_1987a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1987a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1988a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1988a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1989a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1989a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1990a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1990a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1991a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1991a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1992a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1992a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1993a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1993a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1994a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1994a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1995a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1995a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_1996a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1996a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2006a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2006a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2007a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2007a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2008a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2008a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2009a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2009a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2010a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2010a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2011a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2011a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2012a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2012a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2013a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2013a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2014a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2014a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2015a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2015a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2016a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2016a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+modelBV_RR_2017a <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.2017a,
+                       prior = priorBiv_RR10, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 2100 * sc, thin = sc, burnin = 100 * sc, 
+                       verbose = F,singular.ok = T)
+save(modelBV_RR_1987a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1987a.RData")
+save(modelBV_RR_1988a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1988a.RData")
+save(modelBV_RR_1989a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1989a.RData")
+save(modelBV_RR_1990a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1990a.RData")
+save(modelBV_RR_1991a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1991a.RData")
+save(modelBV_RR_1992a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1992a.RData")
+save(modelBV_RR_1993a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1993a.RData")
+save(modelBV_RR_1994a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1994a.RData")
+save(modelBV_RR_1995a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1995a.RData")
+save(modelBV_RR_1996a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_1996a.RData")
+save(modelBV_RR_2006a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2006a.RData")
+save(modelBV_RR_2007a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2007a.RData")
+save(modelBV_RR_2008a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2008a.RData")
+save(modelBV_RR_2009a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2009a.RData")
+save(modelBV_RR_2010a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2010a.RData")
+save(modelBV_RR_2011a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2011a.RData")
+save(modelBV_RR_2012a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2012a.RData")
+save(modelBV_RR_2013a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2013a.RData")
+save(modelBV_RR_2014a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2014a.RData")
+save(modelBV_RR_2015a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2015a.RData")
+save(modelBV_RR_2016a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2016a.RData")
+save(modelBV_RR_2017a,file="C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/objects/modelBV_RR_2017a.RData")
+```
+
+### Results
+
+#### Among-individual correlation between intercepts and slopes for FFD:
+
+```{r results a, include=FALSE}
+cor_BV_RR_1987a_intslope <-
+  modelBV_RR_1987a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1988a_intslope <-
+  modelBV_RR_1988a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1989a_intslope <-
+  modelBV_RR_1989a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1990a_intslope <-
+  modelBV_RR_1990a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1991a_intslope <-
+  modelBV_RR_1991a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1992a_intslope <-
+  modelBV_RR_1992a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1993a_intslope <-
+  modelBV_RR_1993a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1994a_intslope <-
+  modelBV_RR_1994a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1995a_intslope <-
+  modelBV_RR_1995a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1996a_intslope <-
+  modelBV_RR_1996a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2006a_intslope <-
+  modelBV_RR_2006a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2007a_intslope <-
+  modelBV_RR_2007a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2008a_intslope <-
+  modelBV_RR_2008a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2009a_intslope <-
+  modelBV_RR_2009a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2010a_intslope <-
+  modelBV_RR_2010a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2011a_intslope <-
+  modelBV_RR_2011a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2012a_intslope <-
+  modelBV_RR_2012a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2013a_intslope <-
+  modelBV_RR_2013a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2014a_intslope <-
+  modelBV_RR_2014a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2015a_intslope <-
+  modelBV_RR_2015a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2016a_intslope <-
+  modelBV_RR_2016a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2017a_intslope <-
+  modelBV_RR_2017a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+     sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+```
+
+```{r results b}
+posterior.mode(cor_BV_RR_1987a_intslope)
+HPDinterval(cor_BV_RR_1987a_intslope)
+posterior.mode(cor_BV_RR_1988a_intslope)
+HPDinterval(cor_BV_RR_1988a_intslope)
+posterior.mode(cor_BV_RR_1989a_intslope)
+HPDinterval(cor_BV_RR_1989a_intslope)
+posterior.mode(cor_BV_RR_1990a_intslope)
+HPDinterval(cor_BV_RR_1990a_intslope)
+posterior.mode(cor_BV_RR_1991a_intslope)
+HPDinterval(cor_BV_RR_1991a_intslope)
+posterior.mode(cor_BV_RR_1992a_intslope)
+HPDinterval(cor_BV_RR_1992a_intslope)
+posterior.mode(cor_BV_RR_1993a_intslope)
+HPDinterval(cor_BV_RR_1993a_intslope)
+posterior.mode(cor_BV_RR_1994a_intslope)
+HPDinterval(cor_BV_RR_1994a_intslope)
+posterior.mode(cor_BV_RR_1995a_intslope)
+HPDinterval(cor_BV_RR_1995a_intslope)
+posterior.mode(cor_BV_RR_1996a_intslope)
+HPDinterval(cor_BV_RR_1996a_intslope)
+posterior.mode(cor_BV_RR_2006a_intslope)
+HPDinterval(cor_BV_RR_2006a_intslope)
+posterior.mode(cor_BV_RR_2007a_intslope)
+HPDinterval(cor_BV_RR_2007a_intslope)
+posterior.mode(cor_BV_RR_2008a_intslope)
+HPDinterval(cor_BV_RR_2008a_intslope)
+posterior.mode(cor_BV_RR_2009a_intslope)
+HPDinterval(cor_BV_RR_2009a_intslope)
+posterior.mode(cor_BV_RR_2010a_intslope)
+HPDinterval(cor_BV_RR_2010a_intslope)
+posterior.mode(cor_BV_RR_2011a_intslope)
+HPDinterval(cor_BV_RR_2011a_intslope)
+posterior.mode(cor_BV_RR_2012a_intslope)
+HPDinterval(cor_BV_RR_2012a_intslope)
+posterior.mode(cor_BV_RR_2013a_intslope)
+HPDinterval(cor_BV_RR_2013a_intslope)
+posterior.mode(cor_BV_RR_2014a_intslope)
+HPDinterval(cor_BV_RR_2014a_intslope)
+posterior.mode(cor_BV_RR_2015a_intslope)
+HPDinterval(cor_BV_RR_2015a_intslope)
+posterior.mode(cor_BV_RR_2016a_intslope)
+HPDinterval(cor_BV_RR_2016a_intslope)
+posterior.mode(cor_BV_RR_2017a_intslope)
+HPDinterval(cor_BV_RR_2017a_intslope)
+```
+
+Old period: No significant correlation among intercepts and slopes.
+New period: Significant positive correlation among intercepts and slopes.
+
+#### Among-individual correlation between FFD and fitness: 
+
+```{r results c, include=FALSE}
+cor_BV_RR_1987a_intfit <-
+  modelBV_RR_1987a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1988a_intfit <-
+  modelBV_RR_1988a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1989a_intfit <-
+  modelBV_RR_1989a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1990a_intfit <-
+  modelBV_RR_1990a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1991a_intfit <-
+  modelBV_RR_1991a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1992a_intfit <-
+  modelBV_RR_1992a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1993a_intfit <-
+  modelBV_RR_1993a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1994a_intfit <-
+  modelBV_RR_1994a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1995a_intfit <-
+  modelBV_RR_1995a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_1996a_intfit <-
+  modelBV_RR_1996a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2006a_intfit <-
+  modelBV_RR_2006a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2007a_intfit <-
+  modelBV_RR_2007a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2008a_intfit <-
+  modelBV_RR_2008a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2009a_intfit <-
+  modelBV_RR_2009a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2010a_intfit <-
+  modelBV_RR_2010a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2011a_intfit <-
+  modelBV_RR_2011a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2012a_intfit <-
+  modelBV_RR_2012a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2013a_intfit <-
+  modelBV_RR_2013a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2014a_intfit <-
+  modelBV_RR_2014a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2015a_intfit <-
+  modelBV_RR_2015a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2016a_intfit <-
+  modelBV_RR_2016a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+cor_BV_RR_2017a_intfit <-
+  modelBV_RR_2017a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+```
+
+```{r results d}
+posterior.mode(cor_BV_RR_1987a_intfit)
+HPDinterval(cor_BV_RR_1987a_intfit)
+posterior.mode(cor_BV_RR_1988a_intfit)
+HPDinterval(cor_BV_RR_1988a_intfit)
+posterior.mode(cor_BV_RR_1989a_intfit)
+HPDinterval(cor_BV_RR_1989a_intfit)
+posterior.mode(cor_BV_RR_1990a_intfit)
+HPDinterval(cor_BV_RR_1990a_intfit)
+posterior.mode(cor_BV_RR_1991a_intfit)
+HPDinterval(cor_BV_RR_1991a_intfit)
+posterior.mode(cor_BV_RR_1992a_intfit)
+HPDinterval(cor_BV_RR_1992a_intfit)
+posterior.mode(cor_BV_RR_1993a_intfit)
+HPDinterval(cor_BV_RR_1993a_intfit)
+posterior.mode(cor_BV_RR_1994a_intfit)
+HPDinterval(cor_BV_RR_1994a_intfit)
+posterior.mode(cor_BV_RR_1995a_intfit)
+HPDinterval(cor_BV_RR_1995a_intfit)
+posterior.mode(cor_BV_RR_1996a_intfit)
+HPDinterval(cor_BV_RR_1996a_intfit)
+posterior.mode(cor_BV_RR_2006a_intfit)
+HPDinterval(cor_BV_RR_2006a_intfit)
+posterior.mode(cor_BV_RR_2007a_intfit)
+HPDinterval(cor_BV_RR_2007a_intfit)
+posterior.mode(cor_BV_RR_2008a_intfit)
+HPDinterval(cor_BV_RR_2008a_intfit)
+posterior.mode(cor_BV_RR_2009a_intfit)
+HPDinterval(cor_BV_RR_2009a_intfit)
+posterior.mode(cor_BV_RR_2010a_intfit)
+HPDinterval(cor_BV_RR_2010a_intfit)
+posterior.mode(cor_BV_RR_2011a_intfit)
+HPDinterval(cor_BV_RR_2011a_intfit)
+posterior.mode(cor_BV_RR_2012a_intfit)
+HPDinterval(cor_BV_RR_2012a_intfit)
+posterior.mode(cor_BV_RR_2013a_intfit)
+HPDinterval(cor_BV_RR_2013a_intfit)
+posterior.mode(cor_BV_RR_2014a_intfit)
+HPDinterval(cor_BV_RR_2014a_intfit)
+posterior.mode(cor_BV_RR_2015a_intfit)
+HPDinterval(cor_BV_RR_2015a_intfit)
+posterior.mode(cor_BV_RR_2016a_intfit)
+HPDinterval(cor_BV_RR_2016a_intfit)
+posterior.mode(cor_BV_RR_2017a_intfit)
+HPDinterval(cor_BV_RR_2017a_intfit)
+```
+
+Significant negative correlation among FFD and fitness in: 1989, 2006, 2007, 2009, 2011, 2012, 2014, 2016, 2017. 
+
+#### Among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r results e, include=FALSE}
+cor_BV_RR_1987a_slopefit <- 
+  modelBV_RR_1987a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1987a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1988a_slopefit <- 
+  modelBV_RR_1988a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1988a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1989a_slopefit <- 
+  modelBV_RR_1989a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1989a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1990a_slopefit <- 
+  modelBV_RR_1990a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1990a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1991a_slopefit <- 
+  modelBV_RR_1991a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1991a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1992a_slopefit <- 
+  modelBV_RR_1992a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1992a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1993a_slopefit <- 
+  modelBV_RR_1993a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1993a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1994a_slopefit <- 
+  modelBV_RR_1994a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1994a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1995a_slopefit <- 
+  modelBV_RR_1995a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1995a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_1996a_slopefit <- 
+  modelBV_RR_1996a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_1996a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2006a_slopefit <- 
+  modelBV_RR_2006a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2006a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2007a_slopefit <- 
+  modelBV_RR_2007a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2007a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2008a_slopefit <- 
+  modelBV_RR_2008a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2008a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2009a_slopefit <- 
+  modelBV_RR_2009a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2009a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2010a_slopefit <- 
+  modelBV_RR_2010a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2010a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2011a_slopefit <- 
+  modelBV_RR_2011a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2011a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2012a_slopefit <- 
+  modelBV_RR_2012a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2012a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2013a_slopefit <- 
+  modelBV_RR_2013a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2013a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2014a_slopefit <- 
+  modelBV_RR_2014a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2014a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2015a_slopefit <- 
+  modelBV_RR_2015a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2015a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2016a_slopefit <- 
+  modelBV_RR_2016a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2016a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+cor_BV_RR_2017a_slopefit <- 
+  modelBV_RR_2017a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR_2017a$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+```
+
+```{r results f}
+posterior.mode(cor_BV_RR_1987a_slopefit)
+HPDinterval(cor_BV_RR_1987a_slopefit)
+posterior.mode(cor_BV_RR_1988a_slopefit)
+HPDinterval(cor_BV_RR_1988a_slopefit)
+posterior.mode(cor_BV_RR_1989a_slopefit)
+HPDinterval(cor_BV_RR_1989a_slopefit)
+posterior.mode(cor_BV_RR_1990a_slopefit)
+HPDinterval(cor_BV_RR_1990a_slopefit)
+posterior.mode(cor_BV_RR_1991a_slopefit)
+HPDinterval(cor_BV_RR_1991a_slopefit)
+posterior.mode(cor_BV_RR_1992a_slopefit)
+HPDinterval(cor_BV_RR_1992a_slopefit)
+posterior.mode(cor_BV_RR_1993a_slopefit)
+HPDinterval(cor_BV_RR_1993a_slopefit)
+posterior.mode(cor_BV_RR_1994a_slopefit)
+HPDinterval(cor_BV_RR_1994a_slopefit)
+posterior.mode(cor_BV_RR_1995a_slopefit)
+HPDinterval(cor_BV_RR_1995a_slopefit)
+posterior.mode(cor_BV_RR_1996a_slopefit)
+HPDinterval(cor_BV_RR_1996a_slopefit)
+posterior.mode(cor_BV_RR_2006a_slopefit)
+HPDinterval(cor_BV_RR_2006a_slopefit)
+posterior.mode(cor_BV_RR_2007a_slopefit)
+HPDinterval(cor_BV_RR_2007a_slopefit)
+posterior.mode(cor_BV_RR_2008a_slopefit)
+HPDinterval(cor_BV_RR_2008a_slopefit)
+posterior.mode(cor_BV_RR_2009a_slopefit)
+HPDinterval(cor_BV_RR_2009a_slopefit)
+posterior.mode(cor_BV_RR_2010a_slopefit)
+HPDinterval(cor_BV_RR_2010a_slopefit)
+posterior.mode(cor_BV_RR_2011a_slopefit)
+HPDinterval(cor_BV_RR_2011a_slopefit)
+posterior.mode(cor_BV_RR_2012a_slopefit)
+HPDinterval(cor_BV_RR_2012a_slopefit)
+posterior.mode(cor_BV_RR_2013a_slopefit)
+HPDinterval(cor_BV_RR_2013a_slopefit)
+posterior.mode(cor_BV_RR_2014a_slopefit)
+HPDinterval(cor_BV_RR_2014a_slopefit)
+posterior.mode(cor_BV_RR_2015a_slopefit)
+HPDinterval(cor_BV_RR_2015a_slopefit)
+posterior.mode(cor_BV_RR_2016a_slopefit)
+HPDinterval(cor_BV_RR_2016a_slopefit)
+posterior.mode(cor_BV_RR_2017a_slopefit)
+HPDinterval(cor_BV_RR_2017a_slopefit)
+```
+
+Significant negative correlation among FFD and variation in slopes for FFD in: 1990, 2007, 2008, 2009, 2011.
+
+#### Fixed effects
+
+```{r results g}
+summary(modelBV_RR_1987a)$solutions
+summary(modelBV_RR_1988a)$solutions
+summary(modelBV_RR_1989a)$solutions
+summary(modelBV_RR_1990a)$solutions
+summary(modelBV_RR_1991a)$solutions
+summary(modelBV_RR_1992a)$solutions
+summary(modelBV_RR_1993a)$solutions
+summary(modelBV_RR_1994a)$solutions
+summary(modelBV_RR_1995a)$solutions
+summary(modelBV_RR_1996a)$solutions
+summary(modelBV_RR_2006a)$solutions
+summary(modelBV_RR_2007a)$solutions
+summary(modelBV_RR_2008a)$solutions
+summary(modelBV_RR_2009a)$solutions
+summary(modelBV_RR_2010a)$solutions
+summary(modelBV_RR_2011a)$solutions
+summary(modelBV_RR_2012a)$solutions
+summary(modelBV_RR_2013a)$solutions
+summary(modelBV_RR_2014a)$solutions
+summary(modelBV_RR_2015a)$solutions
+summary(modelBV_RR_2016a)$solutions
+summary(modelBV_RR_2017a)$solutions
+```
+
+Significant fixed effect of temperature in all years from the new period, but in none from the old period. 
+
+## With shoot volume
+
+Worth doing?
+
+```{r notif}
+pbPost(title="Done!")
+```
+
+
+
+# TO DO
+
+- Include interaction between year and intercept/slope in the random part of the MCMCglmm models: to see if selection varies among years (instead of doing yearly models)
+- Include interaction between size and intercept/slope in the random part of the MCMCglmm models: to see if selection varies with size (in the same model, without using the BLUPs as above)
+
+
+

@@ -1,0 +1,329 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - Extraction of RN parameters using BLUPs"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs1.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs1.RData")
+load("C:/Users/avald/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs1.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Arnold et al 2019 New Phyt.
+
+The x variable (mean daily temperature April) is mean-centered (substracting the mean), so the intercepts reflect average values for the population and individuals. From here on, we use this mean-centred temperature (cmean_4).
+
+```{r BLUPs_all1}
+data_3yrs$cmean_4<-scale(data_3yrs$mean_4,center=T,scale=F)
+data_4yrs$cmean_4<-scale(data_4yrs$mean_4,center=T,scale=F)
+data_5yrs$cmean_4<-scale(data_5yrs$mean_4,center=T,scale=F)
+```
+
+Plot the main effects (raw values of FFD against mean-centred temperatures for each plant id)
+
+```{r BLUPs_all2, echo=FALSE, fig.height=4, fig.width=5}
+ggplot(data_4yrs, aes(x = cmean_4, y = FFD, group = id)) +
+  geom_line(aes(colour = id),size = 0.1) + ylab("FFD") + 
+  xlab("Mean-centred mean daily temperature April") + my_theme()
+```
+
+# Basic linear model 
+
+Fit a linear model for the fixed effect of temperature on FFD and observe the average population-level reaction norm. Note that we also add a random effect for 'year' to take account of the repeated measures at each temperature (to account for differences among the years across which each id is represented). The mixed model is to be fitted using ML rather than REML so that models that contain different fixed effects can be compared directly.
+
+Using blmer which does maximum a posteriori estimation for linear and generalized linear mixed-effects models in a Bayesian setting. Allows the user to do Bayesian inference or penalized maximum likelihood, with priors imposed on the different model components. 
+
+```{r BLUPs_all3}
+model1.1 <- blmer(FFD ~ cmean_4 + (1|year), REML = FALSE, data = data_4yrs,
+                  lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.1)
+r.squaredGLMM(model1.1)
+```
+
+Visually assess how well the linear model fits the raw data by overlaying the regression line from model1.1 as an average population-level reaction norm. Use the predict function to predict y-values accross the continuous x-axis and then plot the fixed effect of temperature from model1.1 over the raw id-specific reaction norms.
+
+```{r BLUPs_all4, fig.height=4, fig.width=5}
+temperature_pred <- data.frame(cmean_4 = seq(from = min(data_4yrs$cmean_4),
+                                                 to = max(data_4yrs$cmean_4),
+                                                 length.out = 50))
+temperature_pred$fit1.1 <- predict(model1.1, newdata = temperature_pred, re.form = NA) 
+# re.form=NA includes no random effects
+
+# Plot the raw data and overlay the fit of Model1.1
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.1)) +
+  geom_line(data = data_4yrs, aes(y = FFD, colour = id),size = 0.1) +
+  geom_line(size = 2) +  ylab("FFD") + 
+  xlab("Mean-centred mean daily temperature April")+my_theme()
+```
+
+# Quadratic fixed effects model
+
+Fit a quadratic model for the fixed effect of temperature on FFD.
+
+```{r BLUPs_all5}
+model1.2 <- blmer(FFD ~ poly(cmean_4, 2, raw = T) + (1|year), 
+                 REML = FALSE, data = data_4yrs,lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.2)
+r.squaredGLMM(model1.2)
+```
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all6, fig.height=4, fig.width=5}
+temperature_pred$fit1.2 <- predict(model1.2, newdata = temperature_pred, re.form = NA)
+
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.2)) +
+  geom_line(data = data_4yrs, aes(y = FFD, colour = id),size = 0.1) +
+  geom_line(size = 2) + ylab("FFD") + 
+  xlab("Mean-centred mean daily temperature April")+my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all7}
+chi2 <- 2*(summary(model1.2)$logLik - summary(model1.1)$logLik)
+1-pchisq(chi2,1)
+
+AIC(model1.1, model1.2)
+```
+
+Very small increase in R2, non-significant LRT p-value and larger AIC. Model1.1 with only linear (non-quadratic effects) is better.
+
+# Linear fixed effects with random intercepts model
+
+Fit a linear mixed effects model (random intercepts only) for the fixed effect of temperature on FFD and random effect of id intercepts. We are allowing the y-intercept value to vary among ids.
+
+```{r BLUPs_all8}
+model1.3 <- blmer(FFD ~ cmean_4 + (1|year) + (1|id), REML = FALSE, data = data_4yrs,
+                 lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.3)
+r.squaredGLMM(model1.3)
+```
+
+The outcome of the mixed-effects model is the linear effect of temperature on FFD, whilst allowing the intercepts of each id’s FFD to account for some of the residual variance in the model.
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all9, fig.height=4, fig.width=5}
+temperature_pred$fit1.3 <- predict(model1.3, newdata = temperature_pred, re.form = NA)
+
+# Make a prediction for the average population-level mean reaction norm 
+# and append it to the dataset
+data_4yrs$pred_pop1.3  <- predict(model1.3, re.form = NA)
+# Make predictions for each id-level reaction norm 
+data_4yrs$pred_id1.3 <- predict(model1.3, re.form = ~(1|id))
+
+# Plot predicted id reaction norms over the raw data, along with the overall mean
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.3)) +
+  geom_line(data = data_4yrs, aes(y = pred_id1.3, group = id, colour = id), lty = 2,size = 0.1)+
+  geom_line(data = data_4yrs, aes(y = FFD, group = id, colour = id),size = 0.1) +
+  geom_line(size = 2) +
+  ylab("FFD") + xlab("Mean-centred mean daily temperature April") +  my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all10}
+chi2 <- 2*(summary(model1.3)$logLik - summary(model1.1)$logLik)
+1-pchisq(chi2, 1)
+
+AIC(model1.1, model1.2, model1.3)
+```
+
+R2 has substantially increased, significant LRT p-value and smaller AIC. Model1.3 with random intercepts explains more residual variance than model1.1 without trading-off against increased model complexity.
+
+# Linear fixed effects with linear random regression model
+
+Fit a linear mixed effects model for the fixed effect of temperature on FFD and random effect of id intercepts and slopes. Allows the slopes of ids to vary in addition to the intercepts, so that the random regression slopes might be fit better to the observed patterns in the raw data. The addition of ‘+x-variable’ (here: ‘1+cmean_4’) to the left side of the random effect term (‘|id’) in model1.3 allows the slopes of the random id regressions to vary across mean-centred temperature.
+
+```{r BLUPs_all11}
+model1.4 <- blmer(FFD ~ cmean_4 + (1|year) + (1+cmean_4|id), REML = FALSE,
+                  data = data_4yrs,lmerControl(optimizer = "Nelder_Mead"))
+summary(model1.4)
+r.squaredGLMM(model1.4)
+```
+
+Predict values based on the model fit and plot the overall model fit over the top of the raw data.
+
+```{r BLUPs_all12, fig.height=4, fig.width=5}
+temperature_pred$fit1.4 <- predict(model1.4, newdata = temperature_pred, re.form = NA)
+
+# Make a prediction for the population-level mean reaction norm 
+# and append it to the dataset
+data_4yrs$pred_pop1.4  <- predict(model1.4, re.form = NA)
+# Make predictions for the id-level reaction norms
+data_4yrs$pred_id1.4 <- predict(model1.4, re.form = ~(1+cmean_4|id))
+
+# Plot predicted id reaction norms over the raw data, along with the overall mean
+ggplot(temperature_pred, aes(x = cmean_4, y = fit1.4)) +
+  geom_line(data = data_4yrs, aes(y = pred_id1.4, group = id, colour = id), lty = 2,size = 0.1) +
+  geom_line(data = data_4yrs, aes(y = FFD, group = id, colour = id),size = 0.1) +
+  geom_line(size = 2) +
+  ylab("FFD") + xlab("Mean-centred mean daily temperature April") +  my_theme()
+```
+
+Compare with previous model using likelihood ratio test and AIC.
+
+```{r BLUPs_all13}
+chi2 <- 2*(summary(model1.4)$logLik - summary(model1.3)$logLik)
+# The df difference between models can be checked by 
+# looking at the df within the models being compared
+summary(model1.3)$logLik
+summary(model1.4)$logLik
+# Note that between model1.3 and model1.4 there is a change of 2 df, so the 
+# pchisq change needs to be specified with 2 df rather than 1 as in previous comparisons.
+1-pchisq(chi2, 2)
+
+AIC(model1.1, model1.2, model1.3, model1.4)
+```
+
+R2 increases, significant LRT p-value and smaller AIC. The random regression mixed model (model1.4) has significantly improved the model fit to the data. Model1.4 is the best model for these data. We will proceed hereafter with model1.4 to extract the best linear unbiased predictors (BLUPs) for each id.
+
+model# Extract BLUPs from model1.4 (linear random regression mixed model)
+
+BLUPs represent the response of a given id to the fixed effect of temperature as the difference between that id’s predicted response and the population-level average predicted response. Here, we calculate and plot BLUPs for ranking plasticity.
+
+```{r BLUPs_all14}
+id_blups <- ranef(model1.4)$`id`
+id_index <- as.factor(c(1:243))
+id_data  <- cbind(id_index, id_blups)
+colnames(id_data) <- c("id", "BLUP_int", "BLUP_slope")
+with(id_data,cor(BLUP_int,BLUP_slope)) # highly correlated! - BUT correlation should be assessed by looking at he correlation coefficient which is
+# given in the random effects correlation from the model1.4 summary (0.73) !!!
+```
+
+The BLUP intercept term indicates the difference in id elevation relative to the population-average, so more positive values of BLUP intercept indicate that the id’s reaction norm occurs above the population-level average and negative values are below the population-level average. The BLUP intercept values are not a measure of plasticity, but these values may be correlated with BLUP slope values and otherwise may be a parameter of interest for comparing among ids.
+
+```{r BLUPs_all15, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id, BLUP_int)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, BLUP_int,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+The BLUP slope estimate is the difference in slope (relative steepness of change) between the population-level average response and the response of the id. Here, that is the difference in slope of FFD for each value of temperature relative to the population-level average slope.
+
+```{r BLUPs_all16, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id, BLUP_slope)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("Plasticity (BLUP slope estimate)") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, BLUP_slope,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+We now add the BLUP slopes for the ids to the population average. Because the population-level average response is negative overall, all ids have a negative slope when the BLUP slope estimates are added to the population-level average slope estimate from model1.4. 
+
+```{r BLUPs_all17, echo=FALSE, fig.height=4, fig.width=10}
+pop_av_slope <- fixef(model1.4)[2]
+id_data$id_slopes <- id_blups$cmean_4 + pop_av_slope
+# BLUPs by slope + population-level average
+ggplot(id_data, aes(id, id_slopes)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("Plasticity (population-average\n+ BLUP slope estimate)") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id, id_slopes,label=id),size = 3) +
+  theme(axis.text.x = element_blank())
+```
+
+The BLUP intercept and slope estimates are sometimes correlated. The correlation coefficient is given in the random effects correlation from the model1.4 summary, which is 0.73. This positive relationship can clearly be seen when plotting the BLUP slope estimate against the BLUP intercept estimate. Ids with the most positive BLUP slope estimate (labelled) have the highest positive intercept, and have the least plasticity across growth temperatures (see previous figs with the same individuals labelled). 
+
+```{r BLUPs_all18, echo=FALSE, fig.height=4, fig.width=4}
+ggplot(id_data, aes(BLUP_int, BLUP_slope)) +
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(BLUP_int,BLUP_slope,label=id),size = 3) +
+  xlab("BLUP intercept estimate") +
+  ylab("BLUP slope estimate") + my_theme()
+```
+
+We can rank the BLUPs in order: sorting BLUPs by slope of most to least plastic. Because the population-level average response is negative, the most negative BLUP slope estimates represent steeper reaction norm slopes and hence greater plasticity, and more positive BLUP slope estimates represent flatter reaction norms and less plasticity in FFD in response to temperatures.
+
+```{r BLUPs_all19, echo=FALSE, fig.height=4, fig.width=10}
+id_data$id_ordered <- factor(id_data$id,levels = id_data$id[order(id_data$BLUP_slope)])
+ggplot(id_data, aes(id_ordered, BLUP_slope)) +
+  geom_bar(stat = "identity", aes(group = id, fill = id)) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id_ordered, BLUP_slope,label=id),size = 3) +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  my_theme() + theme(axis.text.x = element_blank())
+```
+
+Another way to visualise the plasticity rank for negative data is by adding the BLUP slope values to the population-level average effect of temperature.
+
+```{r BLUPs_all20, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(id_data, aes(id_ordered, id_slopes)) +
+  geom_bar(stat = "identity", aes(group = id, fill = id)) +
+  geom_text_repel(data=subset(id_data, BLUP_int > 2.5),
+            aes(id_ordered, id_slopes,label=id),size = 3) +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (population-average\n+ BLUP slope estimate)") +
+  my_theme() + theme(axis.text.x = element_blank())
+```
+
+Important note! BLUPs estimated from linear mixed-effects regression models fitted in lme4 are single point estimates that do not have associated measures of uncertainty. As a result, any derived statistics or formal interpretation of plasticity based on these BLUPs is potentially very dangerous and anticonservative without properly accounting for estimation uncertainty. For using BLUPs beyond simple ranking (e.g., of the least to most plastic genotypes), it is strongly encouraged to read the references provided here to avoid the misuse of BLUPs by using a Bayesian MCMC framework (e.g., by using the MCMCglmm package in R) to generate estimates of uncertainty around BLUPs (Hadfield, 2010; Hadfield et al., 2010; Houslay & Wilson, 2017).
+
+Merge reaction norm parameters with previous data
+
+```{r BLUPs_all21}
+id_data$id_text<-as.factor(row.names(id_data))
+data_4yrs<-data_4yrs %>%
+   right_join(id_data[c(2:4,6)], by = c("id" = "id_text"))
+```
+
+```{r save data, include=FALSE}
+save(data_3yrs, file="data_3yrs2.RData")
+save(data_4yrs, file="data_4yrs2.RData")
+save(data_5yrs, file="data_5yrs2.RData")
+```

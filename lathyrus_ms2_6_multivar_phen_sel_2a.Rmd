@@ -1,0 +1,435 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 2a (Arnold et al. 2019 Phil. Trans. R. Soc. B)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total1.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Arnold et al. 2019 Phil. Trans. R. Soc. B. Using plant individuals with at least 4 years of data.
+
+# Stack data
+
+The bivariate MCMCglmm models with covariances between fitness and FFD intercepts and slopes are run using a stacked data set. We therefore need to first stack our data and add in index columns of 'traits', 'variable', and 'family', which are all required for MCMCglmm to fit a multivariate model of traits with different distributions. The values of the two variables need to be stacked into a single column and identified as either 'fitness' or 'FFD' with an index column. Likewise, the 'family' index column tells MCMCglmm what distribution family that response variable follows (here, both Gaussian). For this data-set, we put the fitness data first, then the repeated-measures FFD data.
+
+```{r stack data}
+# Create a single data-set "data.stack", with single column at start to index observations
+data.stack <- c()
+data.stack$Obs <- 1:(243 + 1455)
+data.stack$id <- c(data_4yrs_total$id, data_4yrs$id)
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data_4yrs_total_wfirstyr<-data_4yrs_total%>%
+  right_join(data_4yrs[c(3,10)]%>%
+               group_by(id)%>%
+               summarise(first_yr=mean(first_yr)),by="id")
+
+data.stack$year <- c(data_4yrs_total_wfirstyr$first_yr,
+                     data_4yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack$temp <- c(rep(0, 243), data_4yrs$cmean_4)
+
+# Create single column with first fitness values, then FFD values:
+data.stack$fitness.FFD.stack <- c(data_4yrs_total$mean_fitness_rel, data_4yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack$traits <- c(rep("fitness", 243), rep("FFD", 1455))
+data.stack$variable <- data.stack$traits
+# Both fitness and FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack$family <- c(rep("gaussian", 243), rep("gaussian", 1455))
+data.stack <- data.frame(data.stack)
+
+data.stack$id <- as.factor(data.stack$id)
+data.stack$year <- as.factor(data.stack$year)
+head(data.stack)
+```
+
+# Univariate models
+
+## Fitness with no random effects.
+
+Priors are used to keep the MCMCglmm model fitting process within appropriate parameter space. For the purpose of this code, we only need to specify the distributions of residuals (R) and random effects (G) based on the number of model variables and their (co)variances (V).
+
+```{r MCMCglmm models 1,warning=FALSE}
+# Scaling factor for MCMCglmm iterations
+sc <- 100#0 # Increase this parameter for longer runs
+
+priorUV0 <- list(R = list(R1 = list(V = diag(1), nu = 2)))
+
+univar.fitness <- MCMCglmm(mean_fitness_rel ~ 1, 
+                       data = data_4yrs_total,
+                       prior = priorUV0, 
+                       family = "gaussian",
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 2, fig.height=3.5, fig.width=8}
+summary(univar.fitness)
+plot(univar.fitness$VCV)
+```
+
+## FFD with random effects of year and individual-intercept 
+
+```{r MCMCglmm models 3, warning=FALSE, message=FALSE}
+priorUV2 <- list(G = list(G1 = list(V = diag(1), nu = 1),  # for random effect of year
+                          G2 = list(V = diag(1), nu = 1)), # for random effect of id 
+                 R = list(R1 = list(V = diag(1), nu = 2))) 
+
+univar.FFD <- MCMCglmm(FFD ~ cmean_4,
+                     random = ~year + id,
+                     rcov = ~units,
+                     data = data_4yrs,
+                     prior = priorUV2, 
+                     family = "gaussian",
+                     nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 4, fig.height=10, fig.width=8}
+summary(univar.FFD)
+plot(univar.FFD$VCV)
+```
+
+## Random regression for FFD, including random effects of individual slopes
+
+### With variance in intercepts and slopes but no covariance (only two random effects).
+
+```{r MCMCglmm models 5, warning=FALSE,message=FALSE}
+priorUV3_NoCov <- list(G = list(G1 = list(V = diag(1), nu = 1),
+                                # other random effect (YEAR)  
+                                G2 = list(V = diag(1), nu = 1),  # variance in intercepts
+                                G3 = list(V = diag(1), nu = 1)), # variance in slopes 
+                       R = list(R1 = list(V = diag(1), nu = 2)))  
+
+# This model runs, but obviously does not have a covariance between intercept and slope
+univar.FFD_RR_noCov <- MCMCglmm(FFD ~ cmean_4,
+                              random = ~year + id + cmean_4:id,
+                              rcov = ~units,
+                              data = data_4yrs,
+                              prior = priorUV3_NoCov, 
+                              family = "gaussian",
+                              nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 6, fig.height=10, fig.width=8}
+summary(univar.FFD_RR_noCov)
+plot(univar.FFD_RR_noCov$VCV)
+```
+
+### Including covariance between intercept and slope
+
+```{r MCMCglmm models 7, warning=FALSE}
+priorUV2_RR <- list(G = list(G1 = list(V = diag(1), nu = 1),  # other random effect (YEAR)
+                             G2 = list(V = diag(2), nu = 1)),  
+                        # ^ 2x2 variance-covariance matrix for var in slopes + intercepts
+                    R = list(R1 = list(V = diag(1), nu = 2)))  
+
+univar.FFD_RR <- MCMCglmm(FFD ~ cmean_4,
+                        random = ~year + us(1 + cmean_4):id,
+                        rcov = ~units,
+                        data = data_4yrs,
+                        prior = priorUV2_RR, 
+                        family = "gaussian",
+                        nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 8, fig.height=10, fig.width=8}
+summary(univar.FFD_RR)
+plot(univar.FFD_RR$VCV[,1:3])
+plot(univar.FFD_RR$VCV[,4:6])
+```
+
+(Intercept):(Intercept).id represents among-individual variation in intercepts.
+
+cmean_4:(Intercept).id and (Intercept):cmean_4.id represent the covariance between intercept and slope.
+
+cmean_4:cmean_4.id represents the among-individual variation in slopes.
+
+There is among-individual variation in plasticity (IxE) — i.e., individuals change their phenology at different rates in response to temperature.
+
+For interpretation of the among-individual covariance between intercepts and slopes for FFD, it is often easier to convert this to a correlation. We can use the formula for a correlation with the posterior distributions of our (co)variance components, giving us a distribution of correlation values that we can use to calculate estimates and 95% credible intervals:
+
+```{r MCMCglmm models 9}
+cor_univar.FFD_RR_intslope <- univar.FFD_RR$VCV[,"cmean_4:(Intercept).id"]/
+(sqrt(univar.FFD_RR$VCV[,"(Intercept):(Intercept).id"])*
+sqrt(univar.FFD_RR$VCV[,"cmean_4:cmean_4.id"]))
+posterior.mode(cor_univar.FFD_RR_intslope)
+HPDinterval(cor_univar.FFD_RR_intslope)
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). 
+
+Until here, this is similar to code in Houslay & Wilson 2017.
+
+# Bivariate models of both fitness and FFD
+
+Having established that there is among-individual variation in plasticity, we want to now test whether there is an association between variation in FFD (intercept and/or slope) and fitness. We build bivariate models with two response variables, but only one of them (FFD) has repeated observations at the individual level and is a function of the x variable (temperature).
+
+## Random intercepts for individuals
+
+First build a bivariate model with just random intercepts for individuals (id) for FFD. Specify a bivariate prior for MCMCglmm, with the additional random effect of year (as before) and then a random effect for individual. This is specified in the R section of the prior, because we want it to covary with the residual for fitness.
+
+We estimate random intercepts of both traits (FFD and fitness).
+
+The at.level keyword specifies effects as relating to only one of our response variables. 
+
+Houslay & Wilson 2017 standardised FFD by scaling it in order to make the multivariate model easier to fit. Here, it is not standardised.
+
+```{r MCMCglmm models 10}
+priorBiv <- list(G = list(G1 = list(V = diag(1), nu = 1)), 
+                 # ^ random effect for year (fitted for FFD only)
+                 R = list(R1 = list(V = diag(2), nu = 2, covu = TRUE),
+                          # ^ 2-way var-cov matrix of id for FFD, residual for fitness
+                          R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV <- MCMCglmm(fitness.FFD.stack ~ variable - 1 +
+                      # ^ fits a mean for each variable (and no overall mean (hence "-1"))
+                      at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                    random = ~ us(at.level(variable,"FFD")):year +
+                      us(at.level(variable, "FFD")):id,
+                    # ^ random intercepts for individual
+                    rcov = ~us(at.level(variable, "fitness")):id +
+                      # ^ variance between indivdiuals in fitness
+                      # (which is residual variance)
+                      us(at.level(variable, "FFD")):Obs,
+                    # ^ residual variance within indivdiuals, between years
+                    # (labelled by 'Obs')
+                    data = data.stack,
+                    prior = priorBiv, 
+                    family = NULL, # specified already in the data-set
+                    nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 11}
+kable(summary(modelBV)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 12}
+kable(summary(modelBV)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 13}
+kable(summary(modelBV)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+
+```{r MCMCglmm models 14, fig.height=10, fig.width=8}
+plot(modelBV$VCV[,1:3])
+plot(modelBV$VCV[,4:6])
+```
+
+## Random regressions for individuals (FINAL MODELS)
+
+The final stage: Now build a bivariate model with random regressions for individuals across temperatures. Set MCMCglmm bivariate prior, with one additional random effect (for year) and random effects for individual (id) and individual slope (temp:id), which covary with the residual for fitness.
+
+We estimate random intercepts of both traits (FFD and fitness), and random slopes for trait 1 only (FFD).
+
+Houslay & Wilson 2017 standardised FFD by scaling it in order to make the multivariate model easier to fit. Here, it is not standardised. They also had random intercepts for both response traits: ~ us(at.level(trait,1)):year + us(trait + cmean_4:at.level(trait,1)):id
+Having random intercepts for fitness means that there is variance in intercepts for relative fitness - don't think we need that - we consider the ariance between indivdiuals in fitness as residual variance. They also used rcov =~ idh(trait):units. Both idh and us fit different variances across each component in formula, but us will also fit the covariances.
+
+```{r MCMCglmm models 15}
+priorBiv_RR <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE),  
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack,
+                       prior = priorBiv_RR, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 16}
+kable(summary(modelBV_RR)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 17}
+kable(summary(modelBV_RR)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 18}
+kable(summary(modelBV_RR)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+Meaning of each row: "Among-id var in intercept for FFD", "Among-id covar between intercept and slope for FFD", "Among-individual covar between fitness and var in intercepts for FFD", "Among-id covar between intercept and slope for FFD", "Among-id var in slope for FFD", "Among-id covar between slope for FFD and intercept for fitness", "Among-individual covar between fitness and var in intercepts for FFD", "Among-id covar between slope for FFD and intercept for fitness", "Among-id var in intercept for fitness", "Within-id var in FFD between years".
+
+```{r MCMCglmm models 19, fig.height=10, fig.width=8}
+plot(modelBV_RR$VCV[,1:4])
+plot(modelBV_RR$VCV[,5:8])
+plot(modelBV_RR$VCV[,9:11])
+```
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r MCMCglmm models 20}
+kable(diag(autocorr(modelBV_RR$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Ensure that the among-individual correlation between intercepts and slopes for FFD is (approximately) the same as we estimated in our earlier univariate random regression model. 
+
+```{r MCMCglmm models 21, fig.height=3.5, fig.width=8}
+cor_BV_RR_intslope <- 
+  modelBV_RR$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_intslope)
+posterior.mode(cor_BV_RR_intslope)
+HPDinterval(cor_BV_RR_intslope) 
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). Although it is a bit lower than in our earlier univariate random regression model (OK?).
+
+Determining the among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 22, fig.height=3.5, fig.width=8}
+cor_BV_RR_intfit <-
+  modelBV_RR$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_intfit)
+posterior.mode(cor_BV_RR_intfit)
+HPDinterval(cor_BV_RR_intfit)
+```
+
+Negative correlation: Fitness increases when FFD decreases (i.e. is earlier).
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 23, fig.height=3.5, fig.width=8}
+cor_BV_RR_slopefit <- 
+  modelBV_RR$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_slopefit)
+posterior.mode(cor_BV_RR_slopefit)
+HPDinterval(cor_BV_RR_slopefit)
+```
+
+Negative correlation: Fitness increases when the slope for FFD decreases (i.e. is more negative, and therefore plasticity increases). Fitness is higher in more plastic individuals. However, this correlation is not significant because the CIs encompass zero!!!
+
+### Extract selection coefficients from bivariate model with random regressions for individuals
+
+```{r selcoefs, fig.height=3.5, fig.width=8}
+# Extract 3x3 matrix of variance-covariance values for intercepts and slopes of X, and LBS 
+# These are in the 2nd-10th columns of model output
+P.modelBV_RR <- modelBV_RR$VCV[,2:10]         
+P.modelBV_RR.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR.mode[k] <- posterior.mode(P.modelBV_RR[,k])
+P.modelBV_RR.mode
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR <- modelBV_RR$VCV[, c(4,7)]
+S.modelBV_RR <- P.modelBV_RR[, c(3,6)]
+colnames(S.modelBV_RR) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR.mode <- P.modelBV_RR.mode[1:2, 3]
+S.modelBV_RR.mode
+posterior.mode(mcmc(S.modelBV_RR))
+HPDinterval(mcmc(S.modelBV_RR))
+
+# Plot posterior distribution of selection differentials
+par(mfrow = c(1,2))
+plot(density(S.modelBV_RR[,1]), main = "S_intercepts")
+plot(density(S.modelBV_RR[,2]), main = "S_slopes")
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+n <- length(modelBV_RR$VCV[,2])   # sample size
+beta_post_RR <- matrix(NA, n ,2)
+
+for (i in 1:n) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  # 3x3 matrix of var-cov for individual X.int, X.slope and LBS
+  for (k in 1:9) {P3[k] <- P.modelBV_RR[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+# Finally, extract and plot the selection gradients posterior modes 
+# and 95% credible intervals for both selection on intercepts (trait value) 
+# and slopes (trait plasticity).
+# Note that credible intervals are not exactly confidence intervals. See here:
+# https://statsdirect.com/help/basics/confidence_interval.htm and
+# https://stats.stackexchange.com/questions/2272/
+
+colnames(beta_post_RR) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR))
+HPDinterval(mcmc(beta_post_RR))
+
+# Plot posterior distribution of selection gradients
+par(mfrow = c(1,2))
+plot(density(beta_post_RR[,1]), main = "beta_intercepts")
+plot(density(beta_post_RR[,2]), main = "beta_slopes")
+```
+
+
+

@@ -1,0 +1,337 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 2b (Arnold et al. 2019 Phil. Trans. R. Soc. B)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total1.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Arnold et al. 2019 Phil. Trans. R. Soc. B. Using plant individuals with at least 3/5 years of data.
+
+# Using plant individuals with at least 3 years of data.
+
+## Stack data
+
+```{r stack data 1}
+# Create a single data-set "data.stack3", with single column at start to index observations
+data.stack3 <- c()
+data.stack3$Obs <- 1:(359 + 1803)
+data.stack3$id <- c(data_3yrs_total$id, data_3yrs$id)
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data_3yrs_total_wfirstyr<-data_3yrs_total%>%
+  right_join(data_3yrs[c(3,10)]%>%
+               group_by(id)%>%
+               summarise(first_yr=mean(first_yr)),by="id")
+
+data.stack3$year <- c(data_3yrs_total_wfirstyr$first_yr,
+                     data_3yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack3$temp <- c(rep(0, 359), data_3yrs$cmean_4)
+
+# Create single column with first fitness values, then FFD values:
+data.stack3$fitness.FFD.stack <- c(data_3yrs_total$mean_fitness_rel, data_3yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack3$traits <- c(rep("fitness", 359), rep("FFD", 1803))
+data.stack3$variable <- data.stack3$traits
+# Both fitness and FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack3$family <- c(rep("gaussian", 359), rep("gaussian", 1803))
+data.stack3 <- data.frame(data.stack3)
+
+data.stack3$id <- as.factor(data.stack3$id)
+data.stack3$year <- as.factor(data.stack3$year)
+head(data.stack3)
+```
+
+## Bivariate models of fitness and FFD, with random regressions for individuals 
+
+```{r MCMCglmm models 1}
+# Scaling factor for MCMCglmm iterations
+sc <- 100#0 # Increase this parameter for longer runs
+
+priorBiv_RR3 <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE),  
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR3 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack3,
+                       prior = priorBiv_RR3, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 2}
+kable(summary(modelBV_RR3)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 3}
+kable(summary(modelBV_RR3)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 4}
+kable(summary(modelBV_RR3)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+
+```{r MCMCglmm models 5, fig.height=10, fig.width=8}
+plot(modelBV_RR3$VCV[,1:4])
+plot(modelBV_RR3$VCV[,5:8])
+plot(modelBV_RR3$VCV[,9:11])
+```
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r MCMCglmm models 6}
+kable(diag(autocorr(modelBV_RR3$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Ensure that the among-individual correlation between intercepts and slopes for FFD is (approximately) the same as we estimated in our earlier univariate random regression model. 
+
+```{r MCMCglmm models 7, fig.height=3.5, fig.width=8}
+cor_BV_RR_intslope3 <- 
+  modelBV_RR3$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR3$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR3$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_intslope3)
+posterior.mode(cor_BV_RR_intslope3)
+HPDinterval(cor_BV_RR_intslope3) 
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). Although it is a bit lower than in our earlier univariate random regression model (OK?).
+
+Determining the among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 8, fig.height=3.5, fig.width=8}
+cor_BV_RR_intfit3 <-
+  modelBV_RR3$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR3$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR3$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_intfit3)
+posterior.mode(cor_BV_RR_intfit3)
+HPDinterval(cor_BV_RR_intfit3)
+```
+
+Negative correlation: Fitness increases when FFD decreases (i.e. is earlier).
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 9, fig.height=3.5, fig.width=8}
+cor_BV_RR_slopefit3 <- 
+  modelBV_RR3$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR3$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR3$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_slopefit3)
+posterior.mode(cor_BV_RR_slopefit3)
+HPDinterval(cor_BV_RR_slopefit3)
+```
+
+Negative correlation: Fitness increases when the slope for FFD decreases (i.e. is more negative, and therefore plasticity increases). Fitness is higher in more plastic individuals. However, this correlation is not significant because the CIs encompass zero!!!
+
+# Using plant individuals with at least 5 years of data.
+
+## Stack data
+
+```{r stack data 2}
+# Create a single data-set "data.stack5", with single column at start to index observations
+data.stack5 <- c()
+data.stack5$Obs <- 1:(156 + 1107)
+data.stack5$id <- c(data_5yrs_total$id, data_5yrs$id)
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+
+data_5yrs_total_wfirstyr<-data_5yrs_total%>%
+  right_join(data_5yrs[c(3,10)]%>%
+               group_by(id)%>%
+               summarise(first_yr=mean(first_yr)),by="id")
+
+data.stack5$year <- c(data_5yrs_total_wfirstyr$first_yr,
+                     data_5yrs$year)
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack5$temp <- c(rep(0, 156), data_5yrs$cmean_4)
+
+# Create single column with first fitness values, then FFD values:
+data.stack5$fitness.FFD.stack <- c(data_5yrs_total$mean_fitness_rel, data_5yrs$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack5$traits <- c(rep("fitness", 156), rep("FFD", 1107))
+data.stack5$variable <- data.stack5$traits
+# Both fitness and FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack5$family <- c(rep("gaussian", 156), rep("gaussian", 1107))
+data.stack5 <- data.frame(data.stack5)
+
+data.stack5$id <- as.factor(data.stack5$id)
+data.stack5$year <- as.factor(data.stack5$year)
+head(data.stack5)
+```
+
+## Bivariate models of fitness and FFD, with random regressions for individuals 
+
+```{r MCMCglmm models 10}
+priorBiv_RR5 <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE),  
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR5 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp, # single fixed effect of temp 
+                       random = ~us(at.level(variable, "FFD")):year +
+                         us(at.level(variable, "FFD") + 
+                              at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack5,
+                       prior = priorBiv_RR5, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F)
+```
+
+```{r MCMCglmm models 11}
+kable(summary(modelBV_RR5)$solutions,digits=c(3,3,3,0,3),caption="Fixed effects") 
+```
+
+```{r MCMCglmm models 12}
+kable(summary(modelBV_RR5)$Gcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 13}
+kable(summary(modelBV_RR5)$Rcovariances,digits=c(3,3,3,0),caption="Random effects")
+```
+
+```{r MCMCglmm models 14, fig.height=10, fig.width=8}
+plot(modelBV_RR5$VCV[,1:4])
+plot(modelBV_RR5$VCV[,5:8])
+plot(modelBV_RR5$VCV[,9:11])
+```
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r MCMCglmm models 15}
+kable(diag(autocorr(modelBV_RR5$VCV)[2, , ]),caption="Autocorrelation")
+```
+
+Ensure that the among-individual correlation between intercepts and slopes for FFD is (approximately) the same as we estimated in our earlier univariate random regression model. 
+
+```{r MCMCglmm models 16, fig.height=3.5, fig.width=8}
+cor_BV_RR_intslope5 <- 
+  modelBV_RR5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\").id"]/
+(sqrt(modelBV_RR5$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"])*
+sqrt(modelBV_RR5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_intslope5)
+posterior.mode(cor_BV_RR_intslope5)
+HPDinterval(cor_BV_RR_intslope5) 
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). Although it is a bit lower than in our earlier univariate random regression model (OK?).
+
+Determining the among-individual correlation between FFD and fitness: 
+
+```{r MCMCglmm models 17, fig.height=3.5, fig.width=8}
+cor_BV_RR_intfit5 <-
+  modelBV_RR5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\").id"]/
+  (sqrt(modelBV_RR5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR5$VCV[,"at.level(variable, \"FFD\").id:at.level(variable, \"FFD\").id"]))
+plot(cor_BV_RR_intfit5)
+posterior.mode(cor_BV_RR_intfit5)
+HPDinterval(cor_BV_RR_intfit5)
+```
+
+Negative correlation: Fitness increases when FFD decreases (i.e. is earlier).
+
+Determining the among-individual correlation between fitness and variation in slopes for FFD: 
+
+```{r MCMCglmm models 18, fig.height=3.5, fig.width=8}
+cor_BV_RR_slopefit5 <- 
+  modelBV_RR5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"FFD\"):temp.id"]/
+  (sqrt(modelBV_RR5$VCV[,"at.level(variable, \"fitness\").id:at.level(variable, \"fitness\").id"])*
+     sqrt(modelBV_RR5$VCV[,"at.level(variable, \"FFD\"):temp.id:at.level(variable, \"FFD\"):temp.id"]))
+plot(cor_BV_RR_slopefit5)
+posterior.mode(cor_BV_RR_slopefit5)
+HPDinterval(cor_BV_RR_slopefit5)
+```
+
+Negative correlation: Fitness increases when the slope for FFD decreases (i.e. is more negative, and therefore plasticity increases). Fitness is higher in more plastic individuals. However, this correlation is not significant because the CIs encompass zero!!!
+
+
+

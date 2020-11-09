@@ -1,0 +1,213 @@
+---
+title: 'Lathyrus ms2: Calculation number of years FFD, flowering, fitness, flowering with fitness'
+output:
+  word_document:
+    toc: yes
+    toc_depth: '4'
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+```
+
+Read definitive data file for the old period
+
+```{r}
+datadef_old<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/datadef_old.csv")%>%
+  mutate(period="old")
+head(datadef_old)
+```
+
+Extract data for the new period from data used for ms1
+
+```{r}
+datadef_new<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/alldata.csv",
+  header=T,sep="\t",dec=".")[c(1:3,10,12,14,16,18:19)]%>%
+  filter(period=="new")%>% # Keep only data from new period
+  rename(totseed=n_seeds,intactseed=n_intact_seeds)%>% # Column names similar to datadef_old
+  mutate(id_nr=as.integer(gsub("new_","",id)))
+head(datadef_new)
+```
+
+Read info about number of shoots and shoot volume (to see when plants were not flowering but were vegetative)
+
+```{r}
+nshoots_vol<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/info_nshoots_vol_0617.csv",
+  header=T,sep=",",dec=".")
+nshoots_vol$id_nr<-nshoots_vol$id
+nshoots_vol$id<-NULL
+head(nshoots_vol)
+```
+
+```{r}
+datadef_new<-datadef_new%>%
+  full_join(nshoots_vol)%>%
+  mutate(fcode=as.integer(ifelse(!is.na(FFD)|n_fl>0|n_fr>0|totseed>0|intactseed>0,1,NA)))%>%
+  mutate(fcode=as.integer(ifelse(is.na(fcode)&info_nshoots_vol==1,0,fcode)))%>%
+  # 1 = flowering, 0 = not flowering, NA = not known
+  select(year,id_nr,id,fcode,FFD,n_fl,n_fr,totseed,intactseed,shoot_vol,period)%>%
+  # Column order similar to datadef_old
+  arrange(id_nr,year)%>%
+  mutate(n_fl=ifelse(fcode==0,0,n_fl))%>% # When fcode=0, set n_fl=0
+  mutate(n_fr=ifelse(fcode==0,0,n_fr))%>% # When fcode=0, set n_fr=0
+  mutate(totseed=ifelse(fcode==0,0,totseed))%>% # When fcode=0, set totseed=0
+  mutate(intactseed=ifelse(fcode==0,0,intactseed)) # When fcode=0, intactseed=0
+head(datadef_new)
+```
+
+Merge the definitive datasets for old and new period
+
+```{r}
+datadef<-rbind(datadef_old,datadef_new)
+head(datadef)
+```
+
+In the table below, for each year, 1 means that there is a value of the variable for that year, and 0 means that there is no value (NA).
+
+```{r}
+(variables_def<-pivot_longer(datadef, names_to="variable", values_to="data", fcode:shoot_vol)%>%
+   pivot_wider(.,names_from=year,values_from=data)%>%
+   rename(y1987="1987",y1988="1988",y1989="1989",y1990="1990",y1991="1991",y1992="1992",
+          y1993="1993",y1994="1994",y1995="1995",y1996="1996",
+          y2006="2006",y2007="2007",y2008="2008",y2009="2009",y2010="2010",y2011="2011",
+          y2012="2012",y2013="2013",y2014="2014",y2015="2015",y2016="2016",y2017="2017")%>%
+   mutate(y1987=ifelse(is.na(y1987),0,1),y1988=ifelse(is.na(y1988),0,1),
+          y1989=ifelse(is.na(y1989),0,1),y1990=ifelse(is.na(y1990),0,1),
+          y1991=ifelse(is.na(y1991),0,1),y1992=ifelse(is.na(y1992),0,1),
+          y1993=ifelse(is.na(y1993),0,1),y1994=ifelse(is.na(y1994),0,1),
+          y1995=ifelse(is.na(y1995),0,1),y1996=ifelse(is.na(y1996),0,1),
+          y2006=ifelse(is.na(y2006),0,1),y2007=ifelse(is.na(y2007),0,1),
+          y2008=ifelse(is.na(y2008),0,1),y2009=ifelse(is.na(y2009),0,1),
+          y2010=ifelse(is.na(y2010),0,1),y2011=ifelse(is.na(y2011),0,1),
+          y2012=ifelse(is.na(y2012),0,1),y2013=ifelse(is.na(y2013),0,1),
+          y2014=ifelse(is.na(y2014),0,1),y2015=ifelse(is.na(y2015),0,1),
+          y2016=ifelse(is.na(y2016),0,1),y2017=ifelse(is.na(y2017),0,1))%>%
+   select(sort(colnames(.))))
+```
+In the table below, 1 means that the plant was flowering, 0 that it was not flowering (vegetative), and NA that no data is available for that year
+
+```{r}
+(flowering_def<-datadef%>%
+    select(year,id,fcode)%>%
+    pivot_wider(names_from=year,values_from=fcode)%>%
+   select("id",sort(colnames(.))))
+```
+Calculate number of years with information on FFD (n\_years\_FFD), number of years of flowering (n\_years\_flowering), number of years with information on fitness, and number of flowering years with information on fitness for each plant
+
+```{r}
+n_years_def<-full_join(
+  (subset(variables_def,variable=="FFD")%>%
+     mutate(n_years_FFD = rowSums(.[5:26],na.rm=T))%>% # n_years_FFD
+     select(id,id_nr,period,n_years_FFD)),
+  flowering_def%>%
+    mutate(n_years_flowering = rowSums(.[2:23],na.rm=T))%>% # n_years_flowering
+    select(id,n_years_flowering))
+n_years_def<-full_join(n_years_def,
+                   (subset(variables_def,variable=="intactseed")%>%
+     mutate(n_years_fitness = rowSums(.[5:26],na.rm=T))%>%
+     select(id,id_nr,period,n_years_fitness))) # n_years_fitness
+n_years_def<-full_join(n_years_def,
+                   subset((pivot_longer(datadef, names_to="variable", values_to="data", fcode:shoot_vol)),
+                          variable=="intactseed"|variable=="fcode")%>%
+                     pivot_wider(names_from="variable",values_from="data")%>%
+                     filter(fcode==1)%>% # Keep only flowering years
+                     pivot_wider(names_from="year",values_from="intactseed")%>%
+  rename(y1987="1987",y1988="1988",y1989="1989",y1990="1990",y1991="1991",y1992="1992",
+          y1993="1993",y1994="1994",y1995="1995",y1996="1996",
+          y2006="2006",y2007="2007",y2008="2008",y2009="2009",y2010="2010",y2011="2011",
+          y2012="2012",y2013="2013",y2014="2014",y2015="2015",y2016="2016",y2017="2017")%>%
+  mutate(y1987=ifelse(is.na(y1987),0,1),y1988=ifelse(is.na(y1988),0,1),
+          y1989=ifelse(is.na(y1989),0,1),y1990=ifelse(is.na(y1990),0,1),
+          y1991=ifelse(is.na(y1991),0,1),y1992=ifelse(is.na(y1992),0,1),
+          y1993=ifelse(is.na(y1993),0,1),y1994=ifelse(is.na(y1994),0,1),
+          y1995=ifelse(is.na(y1995),0,1),y1996=ifelse(is.na(y1996),0,1),
+          y2006=ifelse(is.na(y2006),0,1),y2007=ifelse(is.na(y2007),0,1),
+          y2008=ifelse(is.na(y2008),0,1),y2009=ifelse(is.na(y2009),0,1),
+          y2010=ifelse(is.na(y2010),0,1),y2011=ifelse(is.na(y2011),0,1),
+          y2012=ifelse(is.na(y2012),0,1),y2013=ifelse(is.na(y2013),0,1),
+          y2014=ifelse(is.na(y2014),0,1),y2015=ifelse(is.na(y2015),0,1),
+          y2016=ifelse(is.na(y2016),0,1),y2017=ifelse(is.na(y2017),0,1))%>%
+  mutate(n_years_fl_fitness = rowSums(.[5:26],na.rm=T))%>%
+  select(id,id_nr,period,n_years_fl_fitness) # n_years_fl_fitness
+)
+head(n_years_def)
+```
+
+Remove ids with n_years_FFD==0
+
+```{r}
+datadef<-anti_join(datadef,
+                   data.frame(id=unique(subset(n_years_def,n_years_FFD==0)$id)))
+n_years_def<-n_years_def%>%
+  filter(n_years_FFD>0)
+```
+
+
+Read data on duration of the study:
+
+```{r}
+duration_study<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/duration_study.csv")
+head(duration_study)
+```
+
+Add info on duration of the study (n_years_study) to n_years_def:
+
+```{r}
+n_years_def<-full_join(n_years_def,duration_study)
+head(n_years_def)
+```
+
+Some plots:
+
+```{r}
+ggplot(n_years_def,aes(x=n_years_study,fill=period))+
+  geom_histogram(binwidth=1,position="dodge")
+ggplot(n_years_def,aes(x=n_years_fl_fitness,fill=period))+
+  geom_histogram(binwidth=1,position="dodge")
+```
+
+Add info on n_years_fl_fitness and n_years_study to datadef
+
+```{r}
+datadef<-full_join(datadef,n_years_def[c(1:3,7:8)])
+head(datadef)
+```
+
+Add temperature data (mean April temp) to datadef
+
+```{r}
+data_sel<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/data_sel.csv",
+                       header=T,sep="\t",dec=",") 
+datadef<-full_join(datadef,unique(data_sel[c(1,171)]))
+datadef$cmean_4<-scale(datadef$mean_4,center=T,scale=F) # Center temperature variable
+head(datadef)
+```
+
+datadef is ready for analyses!
+
+```{r}
+write.csv(datadef,
+          file="C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/datadef.csv",
+          row.names=F)
+```
+
+

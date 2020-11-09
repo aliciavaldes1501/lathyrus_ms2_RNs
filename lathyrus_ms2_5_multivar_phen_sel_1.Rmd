@@ -1,0 +1,308 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity 1 (Houslay & Wilson 2017)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs3.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs3.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs3.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total1.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Houslay & Wilson 2017 (finally not used! - Code on Arnold et al. 2019 Phil. Trans. R. Soc. B. seems better).
+
+# Random regression mixed model (RRMM) using MCMCglmm
+
+Fit the model:
+
+```{r bayes1}
+# Parameter-expanded prior should be uninformative
+# for variances and covariance
+prior_RR <- list(R = list(V = 1, nu = 0.002),
+                 G = list(G1 = list(V = 1, nu = 1,
+                                    alpha.mu = 0,
+                                    alpha.V= 25^2),
+                          G2 = list(V = diag(2), nu = 2,
+                                    alpha.mu = rep(0, 2),
+                                    alpha.V= diag(25^2, 2, 2))))
+# I tweaked this prior from the one below, it works but not 100% sure what I'm doing
+# READ ON PRIOR SPECIFICATIOM!
+
+# prior_RR <- list(R = list(V = 1, nu = 0.002),
+#                 G = list(G1 = list(V = diag(2), nu = 2,
+#                                    alpha.mu = rep(0, 2),
+#                                    alpha.V= diag(25^2, 2, 2))))
+
+mcmc_A_RR <- MCMCglmm(FFD ~ cmean_4, 
+                      # fixed effect of (mean-centred) mean daily temperature April
+                      #random =~ year + us(1 + cmean_4):id,
+                      random=~ year + us(1 + cmean_4):id,
+                      # random effects: year (to take account of the repeated measures                           # at each temperature - account for differences among the years                            # across which each id is represented)
+                      rcov =~ units,         # no specific structure for the residuals
+                      family = "gaussian",
+                      prior =  prior_RR,     # parameter-expanded prior
+                      #nitt=750000,burnin=50000,thin=350, #provided
+                      #nitt=500000,burnin=10000,thin=10,  #ms1
+                      nitt=150000,burnin=3000,thin=100,     #trial
+                      #nitt=10000,burnin=1000,thin=50,    # smaller numbers for fast run
+                      verbose = FALSE,
+                      data = as.data.frame(data_4yrs),
+                      pr = TRUE, # Saves posterior distribution of 
+                      # individual random effects (analagous to BLUP)
+                      saveX = TRUE, # Save fixed effect design matrix
+                      saveZ = TRUE) # Save random effect design matrix
+```
+
+Check model diagnostics using plots of the MCMC samples. Look at the trace/density plots of the posterior distributions for the (co)variances
+
+```{r bayes2}
+plot(mcmc_A_RR$VCV)
+```
+
+For any real analysis various other checks and tests (e.g. of autocorrelation, robustness to different priors, and good model convergence using the geweke.diag and gelman.diag diagnostic functions) should be used before accepting final results.
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r bayes3}
+diag(autocorr(mcmc_A_RR$VCV)[2, , ])
+```
+
+Given that a random regression allows IxE, we want to investigate whether there is support for the hypothesis that individuals vary in the slope of FFD against temperature. Look at the trace and density plots for the posterior distribution of the among-individual variation in slopes term:
+
+```{r bayes4}
+plot(mcmc_A_RR$VCV[,"cmean_4:cmean_4.id"])
+mean(mcmc_A_RR$VCV[,"cmean_4:cmean_4.id"])
+HPDinterval(mcmc_A_RR$VCV[,"cmean_4:cmean_4.id"])
+```
+
+The posterior distribution for slope variance looks good, and the credible intervals show that the lower bound is not close to zero
+
+```{r bayes5}
+summary(mcmc_A_RR)
+```
+
+(Intercept):(Intercept).id    Among-individual variation in intercepts
+cmean_4:(Intercept).id        Covariances
+(Intercept):cmean_4.id        Covariances
+cmean_4:cmean_4.id            Among-individual variation in slopes
+
+There is among-individual variation in plasticity (IxE) — i.e., individuals change their phenology at different rates in response to temperature.
+
+For interpretation of the intercept-slope covariance, it is often easier to convert this to a correlation. Here we can use the formula for a correlation with the posterior distributions of our (co)variance components, giving us a distribution of correlation values that we can use to calculate estimates and 95% credible intervals:
+
+```{r bayes6}
+mcmc_cor_RR <- mcmc_A_RR$VCV[,"cmean_4:(Intercept).id"]/
+(sqrt(mcmc_A_RR$VCV[,"(Intercept):(Intercept).id"])*
+sqrt(mcmc_A_RR$VCV[,"cmean_4:cmean_4.id"]))
+posterior.mode(mcmc_cor_RR)
+HPDinterval(mcmc_cor_RR)
+```
+
+We find a strong positive correlation between among-individual variance in intercepts and slopes, at the intercept (x = 0). 
+
+# Bivariate model with random regression on one trait
+
+Having established that there is among-individual variation in plasticity, we want to now test whether there is an association between variation in FFD (intercept and/or slope) and (relative) fitness. We use mean fitness over all years (relativized).
+
+Add mean fitness over all years (relativized) to data (only one value of fitness for each individual, added at the first year)
+
+```{r bayes7}
+data_3yrs<-data_3yrs%>%
+  right_join(data_3yrs_total[c(1,5)],by="id")%>%
+  group_by(id)%>%
+  mutate(mean_fitness_rel=ifelse(year==min(year),mean_fitness_rel,NA))%>%
+  ungroup()
+data_4yrs<-data_4yrs%>%
+  right_join(data_4yrs_total[c(1,7)],by="id")%>%
+  group_by(id)%>%
+  mutate(mean_fitness_rel=ifelse(year==min(year),mean_fitness_rel,NA))%>%
+  ungroup()
+data_5yrs<-data_5yrs%>%
+  right_join(data_5yrs_total[c(1,5)],by="id")%>%
+  group_by(id)%>%
+  mutate(mean_fitness_rel=ifelse(year==min(year),mean_fitness_rel,NA))%>%
+  ungroup()
+```
+
+We have two response variables, but only one of them (FFD) has repeated observations at the individual level and is a function of the x variable (temperature). We can set up the covariance matrix such that we estimate random intercepts of both traits (FFD and fitness), and random slopes for trait 1 only (FFD).
+
+In addition, as fitness is measured only once then we need to constrain the residual/‘within-individual’ variance such that it is effectively zero (i.e., meaning that all the variance in fitness will be in the among-individual level). We can do this in the R section of the prior, using the fix keyword. Note that the value of 0.0001 is
+adequate here – a smaller value, such as 1e-08, can cause problems with the chain mixing. For the among-individual section, G, we use an uninformative parameter-expanded
+prior for a 3x3 covariance matrix.
+
+Within the model specification itself, we standardise FFD by scaling it (to make the multivariate model easier to fit), and we have already standardised fitness as relative fitness earlier on. The at.level keyword specifies fixed effects as relating to only one of our response variables — here, we have the fixed effect of temperature for FFD (but not for fitness). We set up our random effects in a similar way to the univariate random regression, but here we have 3 variance terms – random intercepts for both response traits, and random slopes for only the first response trait, FFD (we use the at.level keyword here just as we did in the fixed effects). We then fit residual variances for each of our response variables, but do not model the covariance between them (and remember that we have set residual variance in fitness to be essentially zero).
+
+Fit the model:
+
+```{r bayes8}
+prior_biv_RR_px <- list(R = list(V = diag(c(1,0.0001),2,2), nu = 0.002, fix = 2),
+                        G = list(G1 = list(V = 1, nu = 1,
+                                    alpha.mu = 0,
+                                    alpha.V= 25^2),
+                                 G2 = list(V = matrix(c(1,0,0,
+                                                        0,1,0,
+                                                        0,0,1),3,3,
+                                                      byrow = TRUE),
+                                           nu = 3,
+                                           alpha.mu = rep(0,3),
+                                           alpha.V = diag(25^2,3,3))))
+
+mcmc_biv_RR <- MCMCglmm(cbind(scale(FFD),mean_fitness_rel) ~ trait-1 +
+                          at.level(trait,1):cmean_4,
+                        random =~ us(at.level(trait,1)):year + 
+                          us(trait + cmean_4:at.level(trait,1)):id,
+                        rcov =~ idh(trait):units,
+                        family = c("gaussian","gaussian"),
+                        prior = prior_biv_RR_px,
+                        #nitt=950000,burnin=50000,thin=450, #provided
+                        nitt=200000,burnin=3000,thin=100,     #trial
+                        #nitt=10000,burnin=1000,thin=50, # smaller numbers for fast run
+                        verbose = FALSE,
+                        data = as.data.frame(data_4yrs),
+                        pr = TRUE,saveX = TRUE, saveZ = TRUE)
+```
+
+Check model diagnostics using plots of the MCMC samples. Look at the trace/density plots of the posterior distributions for the (co)variances:
+
+```{r bayes9}
+plot(mcmc_biv_RR$VCV)
+```
+
+Check for autocorrelation between successive stored iterations (suggested to be less than 0.1):
+
+```{r bayes10}
+diag(autocorr(mcmc_biv_RR$VCV)[2, , ])
+```
+
+Look at the among-individual variance components:
+
+```{r bayes11}
+summary(mcmc_biv_RR)$Gcovariances
+```
+
+traitFFD                      Variance in intercepts for FFD
+cmean_4:at.level(trait, 1)    Variance in temperature-related slopes for FFD
+traitmean_fitness_rel         Variance in intercepts for relative fitness
+                         
+Ensure that the among-individual correlation between intercepts and slopes for FFD is (approximately) the same as we estimated in our earlier univariate random regression model. We should find the covariance denoted cmean_4:at.level(trait, 1):traitFFD.id, and then calculate the correlation by standardising this by the product of the square root of both variances:
+
+```{r bayes12}
+mcmc_cor_RR_intslope <- mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):traitFFD.id"]/
+  (sqrt(mcmc_biv_RR$VCV[,"traitFFD:traitFFD.id"])*
+     sqrt(mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):cmean_4:at.level(trait, 1).id"]))
+plot(mcmc_cor_RR_intslope)
+posterior.mode(mcmc_cor_RR_intslope)
+HPDinterval(mcmc_cor_RR_intslope) 
+```
+
+Determining the among-individual correlation between FFD and fitness: The covariance traitmean_fitness_rel:traitFFD.id is the among-individual covariance between fitness and variation in intercepts for FFD — here we convert it to a correlation, and we find it is negative Note that, unlike variances, covariances (and correlations) can take on positive and negative values, so we can use the 95% CIs to think about ‘significance’.
+
+```{r bayes13}
+mcmc_cor_RR_intfit <- mcmc_biv_RR$VCV[,"traitmean_fitness_rel:traitFFD.id"]/
+  (sqrt(mcmc_biv_RR$VCV[,"traitmean_fitness_rel:traitmean_fitness_rel.id"])*
+     sqrt(mcmc_biv_RR$VCV[,"traitFFD:traitFFD.id"]))
+posterior.mode(mcmc_cor_RR_intfit)
+HPDinterval(mcmc_cor_RR_intfit)
+```
+
+We also find a negative among-individual correlation between fitness and variation in slopes for FFD (converting the covariance, cmean_4:at.level(trait,
+1):traitmean_fitness_rel.id, to a correlation). BUT in this case, it is not significant because the CIs encompass zero!!!
+
+```{r bayes14}
+mcmc_cor_RR_slopefit <- 
+  mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):traitmean_fitness_rel.id"]/
+  (sqrt(mcmc_biv_RR$VCV[,"traitmean_fitness_rel:traitmean_fitness_rel.id"])*
+     sqrt(mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):cmean_4:at.level(trait, 1).id"]))
+posterior.mode(mcmc_cor_RR_slopefit)
+HPDinterval(mcmc_cor_RR_slopefit)
+```
+
+Again, recall that variation in intercepts is among-individual variance for FFD at x=0 in a random regression model, so the correlation between fitness and intercept is interpretable as the fitness-FFD correlation in this ‘environment’. It should not be too surprising that the intercept:fitness and slope:fitness correlations are so similar, because we have seen from our earlier univariate random regression models that at x=0 the intercept:slope correlations are very high. Those with higher intercepts at x=0 also tended to have higher slopes at that point. 
+We can also visualise this result by extracting the BLUPs for each individual and plotting them. This is a reasonable use of BLUP because are not running statistical analyses on them, we are using the BLUPs (ie the model predictions) only as a visual aid for the interpretation of a statistical model we have fitted. Remember that each of these points has a fair amount of uncertainty around it! We also use the (co)variance estimates from our model to calculate the regression slope directly from the bivariate random regression model:
+
+```{r bayes15, fig.height=4, fig.width=10,warning=F}
+# Get coefficients
+df_biv_rr_coefs <- data_frame(Trait = attr(colMeans(mcmc_biv_RR$Sol), "names"),
+                              Value = colMeans(mcmc_biv_RR$Sol)) %>%
+  separate(Trait, c("tmp","Trait","Type","id"), sep = "\\.", fill = "left") %>%
+  filter(Type == "id") %>%
+  filter(Trait %in% c("traitFFD","traitmean_fitness_rel","level(trait, 1)")) %>%
+  mutate(Trait = ifelse(Trait == "level(trait, 1)", "slopeFFD", Trait)) %>%
+  select(id, Trait, Value) %>%
+  spread(Trait, Value)
+
+# Calculate regression lines from the model fit (co)variances
+ai_fit_slope <- mean(mcmc_biv_RR$VCV[,"traitFFD:traitmean_fitness_rel.id"]/
+                       mcmc_biv_RR$VCV[,"traitFFD:traitFFD.id"])
+as_fit_slope <- mean(mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):traitmean_fitness_rel.id"]/
+mcmc_biv_RR$VCV[,"cmean_4:at.level(trait, 1):cmean_4:at.level(trait, 1).id"])
+
+# Create plots of fitness values against BLUPs of:
+# (i) FFD intercepts,
+# (ii) FFD slopes
+gg_ai_fit <- ggplot(df_biv_rr_coefs,aes(x = traitFFD,y = traitmean_fitness_rel)) +
+  geom_abline(intercept = 0, slope = ai_fit_slope,colour = "grey40") +
+  geom_point(alpha = 0.4) +  my_theme()
+gg_as_fit <- ggplot(df_biv_rr_coefs,aes(x = slopeFFD,y = traitmean_fitness_rel)) +
+  geom_abline(intercept = 0,slope = as_fit_slope,colour = "grey40") +
+  geom_point(alpha = 0.4) + my_theme()
+grid.arrange(gg_ai_fit,gg_as_fit,ncol = 2)
+```
+
+Those with higher average FFD (at the intercept) tend to have lower fitness, but also those that have higher slope values have lower fitness (BUT this is supposed to be non-significant according to the among-individual correlation between fitness and variation in slopes for FFD, where the CIs encompassed zero - see above). These are often characterised as (for example) correlations between fitness and average FFD, and fitness and plasticity. However, interpreting (and generalising) this kind of result is actually more difficult than it seems. For instance, could we infer that plasticity is under selection? Maybe, but not necessarily. For example, we know that slopes and intercepts are strongly positively correlated (at x=0), so we would at least need to try and separate out the “direct” effects of each “trait” (i.e. intercept and slope) on fitness. This could be done, following the conceptual approach of classical selection analysis (e.g. Lande and Arnold 1983) by calculating the partial regressions (interpretable as selection gradients) on intercept and slope on fitness.
+
+We also know that significant among-individual variation in slopes really means that the among-individual variation in FFD changes as a function of our x variable (here, temperature): in other words, individual-by-environment interactions are occurring.
+
+```{r save data, include=FALSE}
+save(data_3yrs, file="data_3yrs4.RData")
+save(data_4yrs, file="data_4yrs4.RData")
+save(data_5yrs, file="data_5yrs4.RData")
+```

@@ -1,0 +1,879 @@
+---
+title: 'Lathyrus ms2: Comparison datafiles old period'
+output:
+  word_document:
+    toc: yes
+    toc_depth: '4'
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+```
+
+\pagebreak
+
+data1: Data derived from Excel file Johan sent for ms1 in the beginning (before imputations by Alicia)
+
+data2: Data derived from Excel file Johan sent for ms1 in the beginning (after imputations by Alicia)
+
+data3: Data derived from Excel file Johan sent recently (88-95, for 87 and 96 the data should be the same as in data2)
+
+```{r}
+# Read the data files
+data1<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/data_19871996.csv",
+  header=T,sep="\t",dec=",") 
+data2<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/alldata.csv",
+  header=T,sep="\t",dec=".")
+data3<-read.csv(
+  "C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/data8796.csv") 
+```
+
+```{r}
+# Select cases/variables
+data1<-data1%>%
+  select(year,id,FFD1,shoot_vol,cum_n_fl,n_fr,total_n_seeds,
+         total_n_intact_seeds)%>% # Here, FFD is not in years from vernal equinox
+  mutate(id_nr=id)
+data1$id<-NULL
+names(data1)<-c("year","FFD1","shoot_vol1","n_fl1","n_fr1","totseed1","intactseed1","id_nr")
+
+data2<-data2%>%
+  filter(period=="old")%>% # Select only data for the "old" period
+  select(year,id,FFD,n_fl,shoot_vol,n_fr,n_seeds,n_intact_seeds)%>%
+  mutate(id_nr=as.numeric(gsub("old_","",id)))
+names(data2)<-c("year","id", # Variable id is only present in data2
+                "FFD2","n_fl2","shoot_vol2","n_fr2","totseed2","intactseed2","id_nr")
+
+data3$X<-NULL
+data3$year<-data3$year+1900
+data3<-data.frame(data3%>%
+  pivot_wider(names_from="variable_name",values_from="data"))
+names(data3)<-c("id_nr","year","fcode", # Variable fcode is only present in data3
+                "FFD3", # Here, FFD comes from variable "fenol" different coding
+                "n_fr3","intactseed3","n_fl3","totseed3","shoot_vol3")
+# year and id_nr are present in all three datasets, will be used to join them
+# FFD values cannot be compared among the three datasets, but the presence of a value can be compared
+```
+
+```{r}
+# Add fcode variable to data1 and data2
+data1<-left_join(data1,data3[1:3])
+data2<-left_join(data2,data3[1:3])
+```
+
+```{r}
+data1<-data1%>%
+  mutate(n_fl1=ifelse(fcode==0&is.na(n_fl1),0,n_fl1),
+         n_fr1=ifelse(fcode==0&is.na(n_fr1),0,n_fr1),
+         totseed1=ifelse(fcode==0&is.na(totseed1),0,totseed1),
+         intactseed1=ifelse(fcode==0&is.na(intactseed1),0,intactseed1))
+```
+
+```{r}
+data2<-data2%>%
+  mutate(n_fl2=ifelse(fcode==0&is.na(n_fl2),0,n_fl2),
+         n_fr2=ifelse(fcode==0&is.na(n_fr2),0,n_fr2),
+         totseed2=ifelse(fcode==0&is.na(totseed2),0,totseed2),
+         intactseed2=ifelse(fcode==0&is.na(intactseed2),0,intactseed2))
+```
+
+```{r}
+data3<-data3%>%
+  mutate(n_fl3=ifelse(fcode==0&is.na(n_fl3),0,n_fl3),
+         n_fr3=ifelse(fcode==0&is.na(n_fr3),0,n_fr3),
+         totseed3=ifelse(fcode==0&is.na(totseed3),0,totseed3),
+         intactseed3=ifelse(fcode==0&is.na(intactseed3),0,intactseed3))
+```
+
+The three datasets merged: FFD1 comes from data1, FFD2 from data2, FFD3 from data3, same for n\_fl1, n\_fl2, n\_fl3... This is how the data looks:
+
+```{r}
+data123<-full_join(data1,data2)%>%
+  full_join(data3)%>%
+  select("year", "id_nr","id",sort(colnames(.)))%>%
+  mutate(id=paste("old",id_nr,sep="_"))
+head(data123)
+```
+
+[...]
+
+# Problems with fcode variable
+
+## Cases where fcode=0 or NA, but there is data on FFD, or n\_fl
+
+```{r}
+data123%>%
+  filter(fcode==0|is.na(fcode))%>%
+  filter(!is.na(FFD1)|!is.na(FFD2)|!is.na(FFD3)|n_fl1>0|n_fl2>0|n_fl3>0)%>%
+  select(year,id_nr,id,fcode,FFD1,FFD2,FFD3,n_fl1,n_fl2,n_fl3)
+```
+
+The first row in the table above has a value of n\_fl in the previous data I got (n\_fl1, n\_fl2), but not in the last data sent by Johan (n\_fl3=NA). **I changed fcode to 1.**
+
+```{r}
+data123<-data123%>%
+  mutate(fcode = ifelse(year==1988&id_nr==470,1,fcode))
+```
+
+The second row in the table above has values of FFD and n\_fl in the previous data I got (FFD1, FFD2, n\_fl1, n\_fl2), but not in the last data sent by Johan (FFD3=NA, n\_fl3=NA). **I changed fcode to 1.**
+
+```{r}
+data123<-data123%>%
+  mutate(fcode = ifelse(year==1989&id_nr==416,1,fcode))
+```
+
+The next two rows in the table above have a value of phenology in the last data sent by Johan (FFD3), but not in the previous data I got (FFD1=FFD2=NA). **I changed fcode to 1**, because apparently they flowered. **Can we get a FFD value from those values in FFD3 (What do 1 and 5 mean?).**
+
+```{r}
+data123<-data123%>%
+  mutate(fcode = ifelse(year==1989&id_nr==100,1,fcode))%>%
+  mutate(fcode = ifelse(year==1990&id_nr==103,1,fcode))
+```
+
+The last four rows in the table above have values of FFD in all three datasets (FFD1, FFD2 and FFD3) but fcode=0 --\> **I changed to fcode=1**. For these rows, values of n\_fl were missing in the previous data I got (n\_fl1=NA), but I imputed them from shoot volume (that is why there are values of n\_fl2).
+
+```{r}
+data123<-data123%>%
+  mutate(fcode = ifelse(year==1993&id_nr==27,1,fcode))%>%
+  mutate(fcode = ifelse(year==1993&id_nr==415,1,fcode))%>%
+  mutate(fcode = ifelse(year==1993&id_nr==258,1,fcode))%>%
+  mutate(fcode = ifelse(year==1993&id_nr==444,1,fcode))
+```
+
+## Cases where fcode=0 or NA, but there are fruits or seeds
+
+```{r}
+data123%>%
+  filter(fcode==0|is.na(fcode))%>%
+  filter(n_fr1>0|n_fr2>0|n_fr3>0|totseed1>0|totseed2>0|totseed3>0|
+           intactseed1>0|intactseed2>0|intactseed3>0)%>%
+  select(year,id_nr,id,fcode,n_fr1,n_fr2,n_fr3,
+         totseed1,totseed2,totseed3,intactseed1,intactseed2,intactseed3)
+```
+
+No cases. Good!
+
+## Cases where fcode is NA, but there is data on shoot volume --> probably grazed plants, fcode remains NA
+
+```{r}
+# data123%>%
+#   filter(is.na(fcode))%>%
+#   filter(shoot_vol1>0|shoot_vol2>0|shoot_vol3>0)%>%
+#   select(year,id_nr,id,fcode,shoot_vol1,shoot_vol2,shoot_vol3)
+```
+
+```{r}
+# data123<-data123%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==384,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==270,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==88,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1989&id_nr==8,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1990&id_nr==389,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1992&id_nr==191,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1992&id_nr==119,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1992&id_nr==247,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1993&id_nr==827,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1993&id_nr==50,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1994&id_nr==385,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1994&id_nr==76,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==1,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==376,0,fcode))%>%
+#   mutate(fcode = ifelse(year==1988&id_nr==381,0,fcode))
+```
+
+# Differences in variables among the three datasets
+
+## FFD
+
+```{r}
+# Create columns that indicate when there is a difference
+# among the three datasets in each variable
+data123<-data123%>%
+  mutate(FFD1na=ifelse(is.na(FFD1),1,0), # 1 = NA, 0 = not NA
+         FFD2na=ifelse(is.na(FFD2),1,0),
+         FFD3na=ifelse(is.na(FFD3),1,0))%>%
+  mutate(FFDsumna=FFD1na+FFD2na+FFD3na)
+# FFDsumna=0 there are values in FFD1, FFD2 and FFD3 --\> OK 
+# FFDsumna=3 no values (NA) in FFD1, FFD2 and FFD3 --\> OK
+```
+
+```{r}
+# Create a new variable, FFD_def, that will have the values of FFD to use.
+data123<-data123%>%
+  mutate(FFD_def=ifelse(FFDsumna==0,FFD2,NA)) 
+# If there are values in data1, data2 and data3,
+# take values from FFD2 (days from vernal equinox)
+```
+
+For the rows below, there are no values in FFD3 (last data sent by Johan), but there are values in FFD1 and FFD2 --\> **I will use values of FFD2** (which are days from the vernal equinox).
+
+```{r}
+subset(data123,FFDsumna==1)[c(1:4,5:7)]
+```
+
+```{r}
+data123<-data123%>%
+  mutate(FFD_def=ifelse(FFDsumna==1,FFD2,FFD_def))
+```
+
+For the rows below: there are no values in FFD1 and FFD2, but there are values in FFD3 (last data sent by Johan) --\> **What to do? Can we get a FFD value from those values in FFD3 (What do those values mean?).**
+
+```{r}
+subset(data123,FFDsumna==2)[c(1:4,5:7)]
+```
+
+First four rows: no info about phenology in the binder, ignore FF3, FFD remains NA.
+Fifth row: FFD3 was during the interval 3/5 - 8/5 (=125.5) --> convert to days after vernal equinox (1990-03-20 21:18:00) --> FFD3 = 46.5 days after vernal equinox --> **I will use this value of FFD3**
+
+```{r}
+data123<-data123%>%
+  mutate(FFD_def=ifelse(year==1990&id_nr==407,46.5,FFD_def))
+```
+
+## Number of flowers
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_dif=ifelse(rowSums(data123[,11]==data123[,12:13])==2,
+                         0,   # No dif in n_fl among the three datasets
+                         1))%>%  # Dif in n_fl among the three datasets
+  mutate(n_fl_dif=ifelse(is.na(n_fl1)&is.na(n_fl2)&is.na(n_fl3),0,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(is.na(n_fl1)&!is.na(n_fl2)&!is.na(n_fl3),1,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(!is.na(n_fl1)&is.na(n_fl2)&!is.na(n_fl3),1,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(!is.na(n_fl1)&!is.na(n_fl2)&is.na(n_fl3),1,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(is.na(n_fl1)&is.na(n_fl2)&!is.na(n_fl3),1,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(!is.na(n_fl1)&is.na(n_fl2)&is.na(n_fl3),1,n_fl_dif))%>%
+  mutate(n_fl_dif=ifelse(is.na(n_fl1)&!is.na(n_fl2)&is.na(n_fl3),1,n_fl_dif))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,n_fl_dif==1)[c(1:4,11:13)])
+```
+
+778 rows where there is difference in the number of flowers among the three datasets
+
+```{r}
+head(subset(data123,n_fl_dif==1)[c(1:4,11:13)])
+```
+
+[...]
+
+```{r}
+# Create a new variable, n_fl_def, that will have the values of n_fl to use.
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(n_fl_dif==0,n_fl2,NA)) 
+# If there are equal values in data1, data2 and data3, 
+# take values from n_fl2
+```
+
+```{r include=FALSE}
+nrow(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==0&is.na(n_fl1)&is.na(n_fl2)
+       &n_fl3==0))
+```
+
+601 cases where fcode=0 and n\_fl3=0 (NA values for n\_fl1 and n\_fl2) --\> **Assign 0 flowers**
+
+```{r}
+head(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==0&is.na(n_fl1)&is.na(n_fl2)
+       &n_fl3==0)[c(1:4,11:13)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==0&is.na(n_fl1)&
+                           is.na(n_fl2)&n_fl3==0,n_fl3,n_fl_def))
+```
+
+Cases where fcode=0 and n\_fl3\<0 --\> must be errors --\> **Assign 0 flowers**
+
+```{r}
+subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==0&n_fl3!=0)[c(1:4,11:13)]
+```
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==0&n_fl3!=0,n_fl2,n_fl_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&
+              !is.na(n_fl2)&is.na(n_fl3)))
+```
+
+47 cases where fcode=1 and there is only data for n\_fl2--\> These are data I have imputed from shoot volume --\> **Use n\_fl2**
+
+```{r}
+head(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&
+              !is.na(n_fl2)&is.na(n_fl3))[c(1:4,11:13)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&
+                           !is.na(n_fl2)&is.na(n_fl3),n_fl2,n_fl_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&
+              is.na(n_fl2)&n_fl3>0))
+```
+
+119 cases where fcode=1 and there is only data for n\_fl3--\> **Use n\_fl3**
+
+```{r}
+head(subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&is.na(n_fl2)&
+         n_fl3>0)[c(1:4,11:13)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==1&is.na(n_fl1)&
+                           is.na(n_fl2)&n_fl3>0,n_fl3,n_fl_def))
+```
+
+Cases where fcode=1 and there is data for nfl1 and nfl2 but not for nfl3 --\> **Use n\_fl2**
+
+```{r}
+subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&n_fl1>0&n_fl2>0&
+         is.na(n_fl3))[c(1:4,11:13)]
+```
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==1&n_fl1>0&n_fl2>0&
+                           is.na(n_fl3),n_fl2,n_fl_def))
+```
+
+Cases where fcode=1 and there is data for the three years but the values are different --\> **Use n\_fl2**
+
+```{r}
+subset(data123,is.na(n_fl_def)&n_fl_dif==1&fcode==1&n_fl1>0&n_fl2>0&
+         n_fl3>0)[c(1:4,11:13)]
+```
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&n_fl_dif==1&fcode==1&n_fl1>0&n_fl2>0&
+                           n_fl3>0,n_fl2,n_fl_def))
+```
+
+Cases where n\_fl3=0 and there is info on number of flowers from data2 --\> **Use n\_fl2**
+
+```{r}
+subset(data123,is.na(n_fl_def)&!is.na(n_fl2))[c(1:4,11:13)]
+```
+
+```{r}
+data123<-data123%>%
+  mutate(n_fl_def=ifelse(is.na(n_fl_def)&!is.na(n_fl2),n_fl2,n_fl_def))
+```
+
+## Number of fruits
+
+```{r}
+data123<-data123%>%
+  mutate(n_fr_dif=ifelse(rowSums(data123[,14]==data123[,15:16])==2,
+                         0,   # No dif among the three datasets
+                         1))%>%  # Dif among the three datasets
+  mutate(n_fr_dif=ifelse(is.na(n_fr1)&is.na(n_fr2)&is.na(n_fr3),0,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(is.na(n_fr1)&!is.na(n_fr2)&!is.na(n_fr3),1,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(!is.na(n_fr1)&is.na(n_fr2)&!is.na(n_fr3),1,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(!is.na(n_fr1)&!is.na(n_fr2)&is.na(n_fr3),1,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(is.na(n_fr1)&is.na(n_fr2)&!is.na(n_fr3),1,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(!is.na(n_fr1)&is.na(n_fr2)&is.na(n_fr3),1,n_fr_dif))%>%
+  mutate(n_fr_dif=ifelse(is.na(n_fr1)&!is.na(n_fr2)&is.na(n_fr3),1,n_fr_dif))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,n_fr_dif==1)[c(1:4,14:16)])
+```
+
+1032 rows where there is difference in the number of fruits among the three datasets
+
+```{r}
+head(subset(data123,n_fr_dif==1)[c(1:4,14:16)])
+```
+
+[...]
+
+```{r}
+# Create a new variable, n_fr_def, that will have the values of n_fr to use.
+data123<-data123%>%
+  mutate(n_fr_def=ifelse(n_fr_dif==0,n_fr2,NA)) 
+# If there are equal values in data1, data2 and data3, 
+# take values from n_fr2
+```
+
+```{r include=FALSE}
+nrow(subset(data123,n_fr_dif==1&n_fr1==n_fr2&is.na(n_fr3)))
+```
+
+246 cases where n\_fr1=n\_fr2 and n\_fr3 is NA --\> Use n\_fr2
+
+```{r}
+head(subset(data123,n_fr_dif==1&n_fr1==n_fr2&is.na(n_fr3))[c(1:4,14:16)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fr_def=ifelse(is.na(n_fr_def)&n_fr_dif==1&n_fr1==n_fr2&is.na(n_fr3),
+                         n_fr2,n_fr_def))
+```
+
+Cases where n\_fr1=n\_fr2 and n\_fr3 is not NA
+
+```{r}
+subset(data123,n_fr_dif==1&n_fr1==n_fr2&!is.na(n_fr3))[c(1:4,14:16)]
+```
+
+**Use n\_fr2 in all three cases**
+
+```{r}
+data123<-data123%>%
+  mutate(n_fr_def=ifelse(year==1988&id_nr==229,n_fr2,n_fr_def))%>%
+  mutate(n_fr_def=ifelse(year==1988&id_nr==355,n_fr2,n_fr_def))%>%
+  mutate(n_fr_def=ifelse(year==1992&id_nr==464,n_fr2,n_fr_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3==0))
+```
+
+695 cases when n\_fr1 and n\_fr2 are NA, and n\_fr3 is 0 --\> **Use n\_fr3**
+
+```{r}
+head(subset(data123,n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3==0)[c(1:4,14:16)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fr_def=ifelse(n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3==0,
+                         n_fr3,n_fr_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3>0))
+```
+
+88 cases when n\_fr1 and n\_fr2 are NA, and n\_fr3 is not 0 --\> **Use n\_fr3**
+
+```{r}
+head(subset(data123,n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3>0)[c(1:4,14:16)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(n_fr_def=ifelse(n_fr_dif==1&is.na(n_fr1)&is.na(n_fr2)&n_fr3>0,
+                         n_fr3,n_fr_def))
+```
+
+## Number of total seeds
+
+```{r}
+data123<-data123%>%
+  mutate(totseed_dif=ifelse(rowSums(data123[,20]==data123[,21:22])==2,
+                         0,   # No dif among the three datasets
+                         1))%>%  # Dif among the three datasets
+  mutate(totseed_dif=ifelse(is.na(totseed1)&is.na(totseed2)&is.na(totseed3),
+                            0,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(is.na(totseed1)&!is.na(totseed2)&!is.na(totseed3),
+                            1,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(!is.na(totseed1)&is.na(totseed2)&!is.na(totseed3),
+                            1,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(!is.na(totseed1)&!is.na(totseed2)&is.na(totseed3),
+                            1,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(is.na(totseed1)&is.na(totseed2)&!is.na(totseed3),
+                            1,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(!is.na(totseed1)&is.na(totseed2)&is.na(totseed3),
+                            1,totseed_dif))%>%
+  mutate(totseed_dif=ifelse(is.na(totseed1)&!is.na(totseed2)&is.na(totseed3),
+                            1,totseed_dif))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,totseed_dif==1))
+```
+
+965 rows where there is difference in the number of total seeds among the three datasets
+
+```{r}
+head(subset(data123,totseed_dif==1)[c(1:4,20:22)])
+```
+
+[...]
+
+```{r}
+# Create a new variable, totseed_def, that will have the values of totseed to use.
+data123<-data123%>%
+  mutate(totseed_def=ifelse(totseed_dif==0,totseed2,NA)) 
+# If there are equal values in data1, data2 and data3, 
+# take values from totseed2
+```
+
+```{r include=FALSE}
+nrow(subset(subset(data123,totseed_dif==1&totseed1==totseed2),
+       is.na(totseed3)|totseed3==0))
+```
+
+91 cases where totseed1=totseed2 and totseed3 is NA or 0 --\> **Use totseed2**
+
+```{r}
+head(subset(subset(data123,totseed_dif==1&totseed1==totseed2),
+       is.na(totseed3)|totseed3==0)[c(1:4,20:22)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(totseed_def=ifelse(totseed_dif==1&totseed1==totseed2&is.na(totseed3),
+                            totseed2,totseed_def))%>%
+  mutate(totseed_def=ifelse(totseed_dif==1&totseed1==totseed2&totseed3==0,
+                            totseed2,totseed_def))
+```
+
+Cases where totseed1=totseed2 and totseed3 is \> 0
+
+```{r}
+subset(data123,totseed_dif==1&totseed1==totseed2&totseed3>0)[c(1:4,20:22)]
+```
+
+First, second, third and fourth case --\> **Use totseed2**
+
+Fifth case --\> **Use totseed3**
+
+```{r}
+data123<-data123%>%
+  mutate(totseed_def=ifelse(year==1988&id_nr==216,totseed2,totseed_def))%>%
+  mutate(totseed_def=ifelse(year==1988&id_nr==229,totseed2,totseed_def))%>%
+  mutate(totseed_def=ifelse(year==1988&id_nr==252,totseed2,totseed_def))%>%
+  mutate(totseed_def=ifelse(year==1988&id_nr==355,totseed2,totseed_def))%>%
+  mutate(totseed_def=ifelse(year==1991&id_nr==278,totseed3,totseed_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,totseed_dif==1&is.na(totseed1)&is.na(totseed2)&
+         !is.na(totseed3)))
+```
+
+803 cases when totseed1 and totseed2 are NA, and totseed3 is not NA --\> **Use totseed3**
+
+```{r}
+head(subset(data123,totseed_dif==1&is.na(totseed1)&is.na(totseed2)&
+         !is.na(totseed3))[c(1:4,20:22)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(totseed_def=ifelse(totseed_dif==1&is.na(totseed1)&is.na(totseed2)&
+                              !is.na(totseed3),totseed3,totseed_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,totseed_dif==1&is.na(totseed_def)))
+```
+
+127 remaining cases when totseed2 is not NA, and totseed3 is 0 or NA --\> **Use totseed2**
+
+```{r}
+head(subset(data123,totseed_dif==1&is.na(totseed_def))[c(1:4,20:22)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(totseed_def=ifelse(totseed_dif==1&is.na(totseed_def),totseed2,totseed_def))
+```
+
+## Number of intact seeds
+
+```{r}
+data123<-data123%>%
+  mutate(intactseed_dif=ifelse(rowSums(data123[,8]==data123[,9:10])==2,
+                         0,   # No dif among the three datasets
+                         1))%>%  # Dif among the three datasets
+  mutate(intactseed_dif=ifelse(is.na(intactseed1)&is.na(intactseed2)&
+                                 is.na(intactseed3),0,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(is.na(intactseed1)&!is.na(intactseed2)&
+                                 !is.na(intactseed3),1,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(!is.na(intactseed1)&is.na(intactseed2)&
+                                 !is.na(intactseed3),1,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(!is.na(intactseed1)&!is.na(intactseed2)&
+                                 is.na(intactseed3),1,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(is.na(intactseed1)&is.na(intactseed2)&
+                                 !is.na(intactseed3),1,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(!is.na(intactseed1)&is.na(intactseed2)&
+                                 is.na(intactseed3),1,intactseed_dif))%>%
+  mutate(intactseed_dif=ifelse(is.na(intactseed1)&!is.na(intactseed2)&
+                                 is.na(intactseed3),1,intactseed_dif))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,intactseed_dif==1))
+```
+
+965 rows where there is difference in the number of intact seeds among the three datasets
+
+```{r}
+head(subset(data123,intactseed_dif==1)[c(1:4,8:10)])
+```
+
+[...]
+
+```{r}
+# Create a new variable, intactseed_def, that will have the values of intactseed to use.
+data123<-data123%>%
+  mutate(intactseed_def=ifelse(intactseed_dif==0,intactseed2,NA)) 
+# If there are equal values in data1, data2 and data3, 
+# take values from intactseed2
+```
+
+```{r include=FALSE}
+nrow(subset(subset(data123,intactseed_dif==1&intactseed1==intactseed2),
+       is.na(intactseed3)|intactseed3==0))
+```
+
+90 cases where intactseed1=intactseed2 and intactseed3 is NA or 0 --\> **Use intactseed2**
+
+```{r}
+head(subset(subset(data123,intactseed_dif==1&intactseed1==intactseed2),
+       is.na(intactseed3)|intactseed3==0)[c(1:4,8:10)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(intactseed_def=ifelse(intactseed_dif==1&intactseed1==intactseed2&
+                                 is.na(intactseed3),intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(intactseed_dif==1&intactseed1==intactseed2&
+                                 intactseed3==0,intactseed2,intactseed_def))
+```
+
+Cases where intactseed1=intactseed2 and intactseed3 is \> 0
+
+```{r}
+subset(data123,intactseed_dif==1&intactseed1==intactseed2&intactseed3>0)[c(1:4,8:10)]
+```
+
+First, second, third, fourth and fifth case --\> **Use intactseed2**
+
+Sixth case --\> **Use intactseed3**
+
+```{r}
+data123<-data123%>%
+  mutate(intactseed_def=ifelse(year==1988&id_nr==133
+                               ,intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1988&id_nr==216,
+                               intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1988&id_nr==229,
+                               intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1988&id_nr==252,
+                               intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1988&id_nr==355,
+                               intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1991&id_nr==278,
+                               intactseed3,intactseed_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,intactseed_dif==1&is.na(intactseed1)&is.na(intactseed2)&
+         !is.na(intactseed3)))
+```
+
+803 cases when intactseed1 and intactseed2 are NA, and intactseed3 is not NA --\> **Use intactseed3**
+
+```{r}
+head(subset(data123,intactseed_dif==1&is.na(intactseed1)&is.na(intactseed2)&
+         !is.na(intactseed3))[c(1:4,8:10)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(intactseed_def=ifelse(intactseed_dif==1
+                               &is.na(intactseed1)&is.na(intactseed2)&
+                                 !is.na(intactseed3),intactseed3,intactseed_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,intactseed_dif==1&is.na(intactseed_def)))
+```
+
+127 remaining cases when intactseed2 is not NA, and intactseed3 is 0 or NA --\> **Use intactseed2 (except for the first one, which was oted as dead in the protocol, so use NA for this one - and also for totseed)**
+
+```{r}
+head(subset(data123,intactseed_dif==1&is.na(intactseed_def))[c(1:4,8:10)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(intactseed_def=ifelse(intactseed_dif==1&is.na(intactseed_def),
+                               intactseed2,intactseed_def))%>%
+  mutate(intactseed_def=ifelse(year==1989&id_nr==416,NA,intactseed_def))%>%
+  mutate(totseed_def=ifelse(year==1989&id_nr==416,NA,totseed_def))
+```
+
+## Shoot volume
+
+```{r}
+data123<-data123%>%
+  mutate(shoot_vol1r=round(shoot_vol1),
+         shoot_vol2r=round(shoot_vol2),
+         shoot_vol3r=round(shoot_vol3))
+data123<-data123%>%
+  mutate(shoot_vol_dif=ifelse(rowSums(data123[,36]==data123[,37:38])==2,
+                         0,   # No dif among the three datasets
+                         1))%>%  # Dif among the three datasets
+  mutate(shoot_vol_dif=ifelse(is.na(shoot_vol1r)&is.na(shoot_vol2r)
+                              &is.na(shoot_vol3r),0,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(is.na(shoot_vol1r)&!is.na(shoot_vol2r)&
+                                !is.na(shoot_vol3r),1,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(!is.na(shoot_vol1r)&is.na(shoot_vol2r)&
+                                !is.na(shoot_vol3r),1,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(!is.na(shoot_vol1r)&!is.na(shoot_vol2r)&
+                                is.na(shoot_vol3r),1,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(is.na(shoot_vol1r)&is.na(shoot_vol2r)&
+                                !is.na(shoot_vol3r),1,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(!is.na(shoot_vol1r)&is.na(shoot_vol2r)&
+                                is.na(shoot_vol3r),1,shoot_vol_dif))%>%
+  mutate(shoot_vol_dif=ifelse(is.na(shoot_vol1r)&!is.na(shoot_vol2r)&
+                                is.na(shoot_vol3r),1,shoot_vol_dif))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,shoot_vol_dif==1))
+```
+
+2108 rows where there is difference in shoot volume among the three datasets
+
+```{r}
+head(subset(data123,shoot_vol_dif==1)[c(1:4,36:38)])
+```
+
+[...]
+
+```{r}
+# Create a new variable, shoot_vol_def, that will have the values of shoot_vol to use.
+data123<-data123%>%
+  mutate(shoot_vol_def=ifelse(shoot_vol_dif==0,shoot_vol2,NA)) 
+# If there are equal values in data1, data2 and data3, 
+# take values from shoot_vol2
+```
+
+```{r include=FALSE}
+nrow(subset(data123,shoot_vol_dif==1&abs(shoot_vol3r-shoot_vol2r)<2))
+```
+
+123 cases where the difference is very small, due to rounding of values --\> **Use shoot\_vol2**
+
+```{r}
+head(subset(data123,shoot_vol_dif==1&abs(shoot_vol3r-shoot_vol2r)<2)[c(1:4,36:38)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(shoot_vol_def=ifelse(shoot_vol_dif==1&abs(shoot_vol3r-shoot_vol2r)<2,
+                              shoot_vol2,shoot_vol_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,is.na(shoot_vol_def)&
+         !is.na(shoot_vol1r)&!is.na(shoot_vol2r)&is.na(shoot_vol3r)))
+```
+
+1230 cases where shoot\_vol3 is NA --\> **Assign shoot\_vol as NA**
+
+```{r}
+head(subset(data123,is.na(shoot_vol_def)&
+         !is.na(shoot_vol1r)&!is.na(shoot_vol2r)&is.na(shoot_vol3r))[c(1:4,36:38)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(shoot_vol_def=ifelse(is.na(shoot_vol_def)&
+         !is.na(shoot_vol1r)&!is.na(shoot_vol2r)&is.na(shoot_vol3r),
+         shoot_vol3r,shoot_vol_def))
+```
+
+```{r include=FALSE}
+nrow(subset(data123,is.na(shoot_vol_def)&
+         is.na(shoot_vol1r)&is.na(shoot_vol2r)&!is.na(shoot_vol3r)))
+```
+
+755 cases where shoot\_vol1 and shoot\_vol2 are NA, but there is a value of shoot\_vol3 --\> **Use shoot\_vol3**
+
+```{r}
+head(subset(data123,is.na(shoot_vol_def)&
+         is.na(shoot_vol1r)&is.na(shoot_vol2r)&shoot_vol3r>0)[c(1:4,17:19)])
+```
+
+[...]
+
+```{r}
+data123<-data123%>%
+  mutate(shoot_vol_def=ifelse(is.na(shoot_vol_def)&
+         is.na(shoot_vol1r)&is.na(shoot_vol2r)&!is.na(shoot_vol3r),
+         shoot_vol3,shoot_vol_def))
+```
+
+# Definitive dataset
+
+I created a "definitive" dataset with the values chosen in each case
+
+```{r }
+# Create definitive dataset
+datadef<-data123%>%
+  select(year,id_nr,id,fcode,FFD_def,n_fl_def,n_fr_def,totseed_def,intactseed_def,
+         shoot_vol_def)%>%
+  rename(FFD=FFD_def,n_fl=n_fl_def,n_fr=n_fr_def,totseed=totseed_def,
+         intactseed=intactseed_def,shoot_vol=shoot_vol_def)%>%
+  arrange(id_nr)
+head(datadef)
+```
+
+[...]
+
+```{r}
+write.csv(datadef,
+          file="C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/data/datadef_old.csv",row.names=F)
+```
+

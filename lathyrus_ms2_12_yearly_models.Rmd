@@ -1,0 +1,1017 @@
+---
+title: "Lathyrus ms2: Selection on reaction norms - multivariate modeling for phenotypic selection on plasticity, yearly models)"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load data created in previous notebooks, include=FALSE}
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_3yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_4yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs4.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms2/code/data_5yrs_total1.RData")
+load("C:/Users/User/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/code/mean_weather_aprilmay.RData")
+```
+
+```{r load packages, include=FALSE}
+library(knitr)
+library(pander)
+library(tidyverse)
+library(ggthemes)
+library(broom)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggrepel)
+library(car)
+library(effects)
+library(RColorBrewer)
+library(MCMCglmm)
+library(blme)
+library(beepr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r pander options, include=FALSE}
+panderOptions('table.continues', '')
+```
+
+Code based on Arnold et al. 2019 Phil. Trans. R. Soc. B.
+
+Number of observations (ids with fitness) for each year
+```{r nobs each year}
+print(data_5yrs%>%
+        group_by(year)%>%
+        summarise(n_id=n()),n=Inf)
+
+print(data_4yrs%>%
+        group_by(year)%>%
+        summarise(n_id=n()),n=Inf)
+```
+
+Using ids with 4 years of data cause there are more observations (ids) for each year. 
+
+## Without effect of number of flowers on fitness
+
+### Stack data
+
+```{r stack data 1987}
+# Create a single data-set "data.stack.1987", with single column at start to index observations
+data.stack.1987 <- c()
+data.stack.1987$Obs <- 1:(71 + 376)
+data.stack.1987$id <- c(subset(data_4yrs,year==1987)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1987)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1987$year <- c(subset(data_4yrs,year==1987)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1987)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1987$temp <- c(rep(0, 71), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1987)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1987$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1987)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1987)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1987$traits <- c(rep("fitness", 71), rep("FFD", 376))
+data.stack.1987$variable <- data.stack.1987$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1987$family <- c(rep("poisson", 71), rep("gaussian", 376))
+data.stack.1987 <- data.frame(data.stack.1987)
+
+data.stack.1987$id <- as.factor(data.stack.1987$id)
+data.stack.1987$year <- as.factor(data.stack.1987$year)
+head(data.stack.1987)
+```
+
+```{r stack data 1988}
+# Create a single data-set "data.stack.1988", with single column at start to index observations
+data.stack.1988 <- c()
+data.stack.1988$Obs <- 1:(87 + 447)
+data.stack.1988$id <- c(subset(data_4yrs,year==1988)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1988)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1988$year <- c(subset(data_4yrs,year==1988)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1988)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1988$temp <- c(rep(0, 87), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1988)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1988$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1988)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1988)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1988$traits <- c(rep("fitness", 87), rep("FFD", 447))
+data.stack.1988$variable <- data.stack.1988$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1988$family <- c(rep("poisson", 87), rep("gaussian", 447))
+data.stack.1988 <- data.frame(data.stack.1988)
+
+data.stack.1988$id <- as.factor(data.stack.1988$id)
+data.stack.1988$year <- as.factor(data.stack.1988$year)
+head(data.stack.1988)
+```
+
+```{r stack data 1989}
+# Create a single data-set "data.stack.1989", with single column at start to index observations
+data.stack.1989 <- c()
+data.stack.1989$Obs <- 1:(60 + 334)
+data.stack.1989$id <- c(subset(data_4yrs,year==1989)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1989)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1989$year <- c(subset(data_4yrs,year==1989)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1989)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1989$temp <- c(rep(0, 60), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1989)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1989$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1989)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1989)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1989$traits <- c(rep("fitness", 60), rep("FFD", 334))
+data.stack.1989$variable <- data.stack.1989$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1989$family <- c(rep("poisson", 60), rep("gaussian", 334))
+data.stack.1989 <- data.frame(data.stack.1989)
+
+data.stack.1989$id <- as.factor(data.stack.1989$id)
+data.stack.1989$year <- as.factor(data.stack.1989$year)
+head(data.stack.1989)
+```
+
+```{r stack data 1990}
+# Create a single data-set "data.stack.1990", with single column at start to index observations
+data.stack.1990 <- c()
+data.stack.1990$Obs <- 1:(71 + 374)
+data.stack.1990$id <- c(subset(data_4yrs,year==1990)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1990)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1990$year <- c(subset(data_4yrs,year==1990)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1990)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1990$temp <- c(rep(0, 71), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1990)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1990$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1990)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1990)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1990$traits <- c(rep("fitness", 71), rep("FFD", 374))
+data.stack.1990$variable <- data.stack.1990$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1990$family <- c(rep("poisson", 71), rep("gaussian", 374))
+data.stack.1990 <- data.frame(data.stack.1990)
+
+data.stack.1990$id <- as.factor(data.stack.1990$id)
+data.stack.1990$year <- as.factor(data.stack.1990$year)
+head(data.stack.1990)
+```
+
+```{r stack data 1991}
+# Create a single data-set "data.stack.1991", with single column at start to index observations
+data.stack.1991 <- c()
+data.stack.1991$Obs <- 1:(82 + 427)
+data.stack.1991$id <- c(subset(data_4yrs,year==1991)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1991)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1991$year <- c(subset(data_4yrs,year==1991)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1991)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1991$temp <- c(rep(0, 82), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1991)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1991$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1991)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1991)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1991$traits <- c(rep("fitness", 82), rep("FFD", 427))
+data.stack.1991$variable <- data.stack.1991$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1991$family <- c(rep("poisson", 82), rep("gaussian", 427))
+data.stack.1991 <- data.frame(data.stack.1991)
+
+data.stack.1991$id <- as.factor(data.stack.1991$id)
+data.stack.1991$year <- as.factor(data.stack.1991$year)
+head(data.stack.1991)
+```
+
+```{r stack data 1992}
+# Create a single data-set "data.stack.1992", with single column at start to index observations
+data.stack.1992 <- c()
+data.stack.1992$Obs <- 1:(70 + 368)
+data.stack.1992$id <- c(subset(data_4yrs,year==1992)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1992)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1992$year <- c(subset(data_4yrs,year==1992)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1992)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1992$temp <- c(rep(0, 70), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1992)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1992$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1992)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1992)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1992$traits <- c(rep("fitness", 70), rep("FFD", 368))
+data.stack.1992$variable <- data.stack.1992$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1992$family <- c(rep("poisson", 70), rep("gaussian", 368))
+data.stack.1992 <- data.frame(data.stack.1992)
+
+data.stack.1992$id <- as.factor(data.stack.1992$id)
+data.stack.1992$year <- as.factor(data.stack.1992$year)
+head(data.stack.1992)
+```
+
+```{r stack data 1993}
+# Create a single data-set "data.stack.1993", with single column at start to index observations
+data.stack.1993 <- c()
+data.stack.1993$Obs <- 1:(78 + 407)
+data.stack.1993$id <- c(subset(data_4yrs,year==1993)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1993)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1993$year <- c(subset(data_4yrs,year==1993)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1993)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1993$temp <- c(rep(0, 78), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1993)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1993$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1993)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1993)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1993$traits <- c(rep("fitness", 78), rep("FFD", 407))
+data.stack.1993$variable <- data.stack.1993$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1993$family <- c(rep("poisson", 78), rep("gaussian", 407))
+data.stack.1993 <- data.frame(data.stack.1993)
+
+data.stack.1993$id <- as.factor(data.stack.1993$id)
+data.stack.1993$year <- as.factor(data.stack.1993$year)
+head(data.stack.1993)
+```
+
+```{r stack data 1994}
+# Create a single data-set "data.stack.1994", with single column at start to index observations
+data.stack.1994 <- c()
+data.stack.1994$Obs <- 1:(82 + 414)
+data.stack.1994$id <- c(subset(data_4yrs,year==1994)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1994)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1994$year <- c(subset(data_4yrs,year==1994)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1994)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1994$temp <- c(rep(0, 82), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1994)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1994$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1994)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1994)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1994$traits <- c(rep("fitness", 82), rep("FFD", 414))
+data.stack.1994$variable <- data.stack.1994$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1994$family <- c(rep("poisson", 82), rep("gaussian", 414))
+data.stack.1994 <- data.frame(data.stack.1994)
+
+data.stack.1994$id <- as.factor(data.stack.1994$id)
+data.stack.1994$year <- as.factor(data.stack.1994$year)
+head(data.stack.1994)
+```
+
+```{r stack data 1995}
+# Create a single data-set "data.stack.1995", with single column at start to index observations
+data.stack.1995 <- c()
+data.stack.1995$Obs <- 1:(20 + 119)
+data.stack.1995$id <- c(subset(data_4yrs,year==1995)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1995)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1995$year <- c(subset(data_4yrs,year==1995)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1995)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1995$temp <- c(rep(0, 20), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1995)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1995$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1995)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1995)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1995$traits <- c(rep("fitness", 20), rep("FFD", 119))
+data.stack.1995$variable <- data.stack.1995$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1995$family <- c(rep("poisson", 20), rep("gaussian", 119))
+data.stack.1995 <- data.frame(data.stack.1995)
+
+data.stack.1995$id <- as.factor(data.stack.1995$id)
+data.stack.1995$year <- as.factor(data.stack.1995$year)
+head(data.stack.1995)
+```
+
+```{r stack data 1996}
+# Create a single data-set "data.stack.1996", with single column at start to index observations
+data.stack.1996 <- c()
+data.stack.1996$Obs <- 1:(24 + 139)
+data.stack.1996$id <- c(subset(data_4yrs,year==1996)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1996)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.1996$year <- c(subset(data_4yrs,year==1996)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1996)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.1996$temp <- c(rep(0, 24), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1996)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.1996$fitness.FFD.stack <- c(round(subset(data_4yrs,year==1996)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==1996)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.1996$traits <- c(rep("fitness", 24), rep("FFD", 139))
+data.stack.1996$variable <- data.stack.1996$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.1996$family <- c(rep("poisson", 24), rep("gaussian", 139))
+data.stack.1996 <- data.frame(data.stack.1996)
+
+data.stack.1996$id <- as.factor(data.stack.1996$id)
+data.stack.1996$year <- as.factor(data.stack.1996$year)
+head(data.stack.1996)
+```
+
+```{r stack data 2006}
+# Create a single data-set "data.stack.2006", with single column at start to index observations
+data.stack.2006 <- c()
+data.stack.2006$Obs <- 1:(45 + 385)
+data.stack.2006$id <- c(subset(data_4yrs,year==2006)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2006)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2006$year <- c(subset(data_4yrs,year==2006)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2006)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2006$temp <- c(rep(0, 45), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2006)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2006$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2006)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2006)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2006$traits <- c(rep("fitness", 45), rep("FFD", 385))
+data.stack.2006$variable <- data.stack.2006$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2006$family <- c(rep("poisson", 45), rep("gaussian", 385))
+data.stack.2006 <- data.frame(data.stack.2006)
+
+data.stack.2006$id <- as.factor(data.stack.2006$id)
+data.stack.2006$year <- as.factor(data.stack.2006$year)
+head(data.stack.2006)
+```
+
+```{r stack data 2007}
+# Create a single data-set "data.stack.2007", with single column at start to index observations
+data.stack.2007 <- c()
+data.stack.2007$Obs <- 1:(88 + 681)
+data.stack.2007$id <- c(subset(data_4yrs,year==2007)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2007)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2007$year <- c(subset(data_4yrs,year==2007)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2007)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2007$temp <- c(rep(0, 88), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2007)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2007$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2007)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2007)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2007$traits <- c(rep("fitness", 88), rep("FFD", 681))
+data.stack.2007$variable <- data.stack.2007$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2007$family <- c(rep("poisson", 88), rep("gaussian", 681))
+data.stack.2007 <- data.frame(data.stack.2007)
+
+data.stack.2007$id <- as.factor(data.stack.2007$id)
+data.stack.2007$year <- as.factor(data.stack.2007$year)
+head(data.stack.2007)
+```
+
+```{r stack data 2008}
+# Create a single data-set "data.stack.2008", with single column at start to index observations
+data.stack.2008 <- c()
+data.stack.2008$Obs <- 1:(79 + 617)
+data.stack.2008$id <- c(subset(data_4yrs,year==2008)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2008)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2008$year <- c(subset(data_4yrs,year==2008)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2008)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2008$temp <- c(rep(0, 79), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2008)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2008$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2008)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2008)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2008$traits <- c(rep("fitness", 79), rep("FFD", 617))
+data.stack.2008$variable <- data.stack.2008$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2008$family <- c(rep("poisson", 79), rep("gaussian", 617))
+data.stack.2008 <- data.frame(data.stack.2008)
+
+data.stack.2008$id <- as.factor(data.stack.2008$id)
+data.stack.2008$year <- as.factor(data.stack.2008$year)
+head(data.stack.2008)
+```
+
+```{r stack data 2009}
+# Create a single data-set "data.stack.2009", with single column at start to index observations
+data.stack.2009 <- c()
+data.stack.2009$Obs <- 1:(59 + 494)
+data.stack.2009$id <- c(subset(data_4yrs,year==2009)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2009)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2009$year <- c(subset(data_4yrs,year==2009)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2009)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2009$temp <- c(rep(0, 59), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2009)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2009$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2009)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2009)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2009$traits <- c(rep("fitness", 59), rep("FFD", 494))
+data.stack.2009$variable <- data.stack.2009$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2009$family <- c(rep("poisson", 59), rep("gaussian", 494))
+data.stack.2009 <- data.frame(data.stack.2009)
+
+data.stack.2009$id <- as.factor(data.stack.2009$id)
+data.stack.2009$year <- as.factor(data.stack.2009$year)
+head(data.stack.2009)
+```
+
+```{r stack data 2010}
+# Create a single data-set "data.stack.2010", with single column at start to index observations
+data.stack.2010 <- c()
+data.stack.2010$Obs <- 1:(74 + 598)
+data.stack.2010$id <- c(subset(data_4yrs,year==2010)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2010)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2010$year <- c(subset(data_4yrs,year==2010)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2010)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2010$temp <- c(rep(0, 74), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2010)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2010$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2010)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2010)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2010$traits <- c(rep("fitness", 74), rep("FFD", 598))
+data.stack.2010$variable <- data.stack.2010$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2010$family <- c(rep("poisson", 74), rep("gaussian", 598))
+data.stack.2010 <- data.frame(data.stack.2010)
+
+data.stack.2010$id <- as.factor(data.stack.2010$id)
+data.stack.2010$year <- as.factor(data.stack.2010$year)
+head(data.stack.2010)
+```
+
+```{r stack data 2011}
+# Create a single data-set "data.stack.2011", with single column at start to index observations
+data.stack.2011 <- c()
+data.stack.2011$Obs <- 1:(76 + 594)
+data.stack.2011$id <- c(subset(data_4yrs,year==2011)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2011)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2011$year <- c(subset(data_4yrs,year==2011)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2011)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2011$temp <- c(rep(0, 76), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2011)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2011$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2011)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2011)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2011$traits <- c(rep("fitness", 76), rep("FFD", 594))
+data.stack.2011$variable <- data.stack.2011$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2011$family <- c(rep("poisson", 76), rep("gaussian", 594))
+data.stack.2011 <- data.frame(data.stack.2011)
+
+data.stack.2011$id <- as.factor(data.stack.2011$id)
+data.stack.2011$year <- as.factor(data.stack.2011$year)
+head(data.stack.2011)
+```
+
+```{r stack data 2012}
+# Create a single data-set "data.stack.2012", with single column at start to index observations
+data.stack.2012 <- c()
+data.stack.2012$Obs <- 1:(90 + 695)
+data.stack.2012$id <- c(subset(data_4yrs,year==2012)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2012)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2012$year <- c(subset(data_4yrs,year==2012)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2012)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2012$temp <- c(rep(0, 90), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2012)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2012$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2012)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2012)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2012$traits <- c(rep("fitness", 90), rep("FFD", 695))
+data.stack.2012$variable <- data.stack.2012$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2012$family <- c(rep("poisson", 90), rep("gaussian", 695))
+data.stack.2012 <- data.frame(data.stack.2012)
+
+data.stack.2012$id <- as.factor(data.stack.2012$id)
+data.stack.2012$year <- as.factor(data.stack.2012$year)
+head(data.stack.2012)
+```
+
+```{r stack data 2013}
+# Create a single data-set "data.stack.2013", with single column at start to index observations
+data.stack.2013 <- c()
+data.stack.2013$Obs <- 1:(62 + 500)
+data.stack.2013$id <- c(subset(data_4yrs,year==2013)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2013)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2013$year <- c(subset(data_4yrs,year==2013)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2013)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2013$temp <- c(rep(0, 62), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2013)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2013$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2013)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2013)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2013$traits <- c(rep("fitness", 62), rep("FFD", 500))
+data.stack.2013$variable <- data.stack.2013$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2013$family <- c(rep("poisson", 62), rep("gaussian", 500))
+data.stack.2013 <- data.frame(data.stack.2013)
+
+data.stack.2013$id <- as.factor(data.stack.2013$id)
+data.stack.2013$year <- as.factor(data.stack.2013$year)
+head(data.stack.2013)
+```
+
+```{r stack data 2014}
+# Create a single data-set "data.stack.2014", with single column at start to index observations
+data.stack.2014 <- c()
+data.stack.2014$Obs <- 1:(54 + 461)
+data.stack.2014$id <- c(subset(data_4yrs,year==2014)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2014)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2014$year <- c(subset(data_4yrs,year==2014)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2014)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2014$temp <- c(rep(0, 54), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2014)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2014$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2014)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2014)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2014$traits <- c(rep("fitness", 54), rep("FFD", 461))
+data.stack.2014$variable <- data.stack.2014$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2014$family <- c(rep("poisson", 54), rep("gaussian", 461))
+data.stack.2014 <- data.frame(data.stack.2014)
+
+data.stack.2014$id <- as.factor(data.stack.2014$id)
+data.stack.2014$year <- as.factor(data.stack.2014$year)
+head(data.stack.2014)
+```
+
+```{r stack data 2015}
+# Create a single data-set "data.stack.2015", with single column at start to index observations
+data.stack.2015 <- c()
+data.stack.2015$Obs <- 1:(29 + 214)
+data.stack.2015$id <- c(subset(data_4yrs,year==2015)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2015)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2015$year <- c(subset(data_4yrs,year==2015)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2015)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2015$temp <- c(rep(0, 29), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2015)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2015$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2015)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2015)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2015$traits <- c(rep("fitness", 29), rep("FFD", 214))
+data.stack.2015$variable <- data.stack.2015$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2015$family <- c(rep("poisson", 29), rep("gaussian", 214))
+data.stack.2015 <- data.frame(data.stack.2015)
+
+data.stack.2015$id <- as.factor(data.stack.2015$id)
+data.stack.2015$year <- as.factor(data.stack.2015$year)
+head(data.stack.2015)
+```
+
+```{r stack data 2016}
+# Create a single data-set "data.stack.2016", with single column at start to index observations
+data.stack.2016 <- c()
+data.stack.2016$Obs <- 1:(76 + 569)
+data.stack.2016$id <- c(subset(data_4yrs,year==2016)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2016)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2016$year <- c(subset(data_4yrs,year==2016)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2016)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2016$temp <- c(rep(0, 76), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2016)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2016$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2016)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2016)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2016$traits <- c(rep("fitness", 76), rep("FFD", 569))
+data.stack.2016$variable <- data.stack.2016$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2016$family <- c(rep("poisson", 76), rep("gaussian", 569))
+data.stack.2016 <- data.frame(data.stack.2016)
+
+data.stack.2016$id <- as.factor(data.stack.2016$id)
+data.stack.2016$year <- as.factor(data.stack.2016$year)
+head(data.stack.2016)
+```
+
+```{r stack data 2017}
+# Create a single data-set "data.stack.2017", with single column at start to index observations
+data.stack.2017 <- c()
+data.stack.2017$Obs <- 1:(78 + 604)
+data.stack.2017$id <- c(subset(data_4yrs,year==2017)$id, 
+                        data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2017)$id,]$id) 
+
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+data.stack.2017$year <- c(subset(data_4yrs,year==2017)$first_yr,
+                          data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2017)$id,]$year)
+
+# Temperature column is only relevant for FFD, but is set to 0 for fitness values
+data.stack.2017$temp <- c(rep(0, 78), data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2017)$id,]$cmean_4)
+
+# Create single column with first fitness values (ABSOLUTE VALUES) for the particular year, then FFD values:
+data.stack.2017$fitness.FFD.stack <- c(round(subset(data_4yrs,year==2017)$n_intact_seeds),
+                                       data_4yrs[data_4yrs$id %in% subset(data_4yrs,year==2017)$id,]$FFD)
+
+# Create 3 index columns needed for MCMCglmm
+data.stack.2017$traits <- c(rep("fitness", 78), rep("FFD", 604))
+data.stack.2017$variable <- data.stack.2017$traits
+# Fitness will be modelled with an overdispersed Poisson 
+# FFD will be modelled with a Gaussian distribution
+# Specify this with the column 'family':
+data.stack.2017$family <- c(rep("poisson", 78), rep("gaussian", 604))
+data.stack.2017 <- data.frame(data.stack.2017)
+
+data.stack.2017$id <- as.factor(data.stack.2017$id)
+data.stack.2017$year <- as.factor(data.stack.2017$year)
+head(data.stack.2017)
+```
+
+### Fit models
+
+```{r MCMCglmm models 1}
+# Scaling factor for MCMCglmm iterations
+sc <- 100#0 # Increase this parameter for longer runs
+
+priorBiv_RR.years <- list(G = list(G1 = list(V = diag(1), nu = 1)),
+                    # ^ random effect for year (fitted for FFD only)
+                    R = list(R1 = list(V = diag(3), nu = 3, covu = TRUE), 
+                             # ^ 3-way var-cov matrix of (id + temp:id) for FFD,
+                             # residual for fitness
+                             R2 = list(V = diag(1), nu = 1))) # residual for FFD
+
+modelBV_RR_1987 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + 
+                         # ^ means for each variable (and no overall mean (hence "-1"))
+                         at.level(variable, "FFD"):temp,  # single fixed effect of temp 
+                         random = ~us(at.level(variable, "FFD")):year +
+                           us(at.level(variable, "FFD") + 
+                                at.level(variable,"FFD"):temp):id,
+                       # ^ random intercepts for individual, 
+                       # and random slopes for temp|id
+                       rcov = ~us(at.level(variable, "fitness")):id + 
+                         # ^ variance between indivdiuals in fitness
+                         # (which is residual variance)
+                         us(at.level(variable, "FFD")):Obs,    
+                         # ^ residual variance within indivdiuals between years 
+                       # (labelled by 'Obs')
+                       data = data.stack.1987,
+                       prior = priorBiv_RR.years, 
+                       family = NULL, # specified already in the data-set
+                       nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1988 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1988,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1989 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1989,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1990 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1990,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1991 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1991,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1992 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1992,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1993 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1993,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1994 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1994,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1995 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1995,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_1996 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.1996,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2006 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2006,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2007 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2007,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2008 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2008,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2009 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2009,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2010 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2010,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2011 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2011,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2012 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2012,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2013 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2013,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2014 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2014,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2015 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2015,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2016 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2016,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+modelBV_RR_2017 <- MCMCglmm(fitness.FFD.stack ~ variable - 1 + at.level(variable, "FFD"):temp,
+                            random = ~us(at.level(variable, "FFD")):year +
+                              us(at.level(variable, "FFD") + at.level(variable,"FFD"):temp):id,
+                            rcov = ~us(at.level(variable, "fitness")):id + 
+                              us(at.level(variable, "FFD")):Obs,
+                            data = data.stack.2017,prior = priorBiv_RR.years,family = NULL, 
+                            nitt = 1100 * sc, thin = sc, burnin = 100 * sc, verbose = F,singular.ok = T)
+```
+
+### Summaries
+
+```{r MCMCglmm models 2}
+summary(modelBV_RR_1987)
+summary(modelBV_RR_1988)
+summary(modelBV_RR_1989)
+summary(modelBV_RR_1990)
+summary(modelBV_RR_1991)
+summary(modelBV_RR_1992)
+summary(modelBV_RR_1993)
+summary(modelBV_RR_1994)
+summary(modelBV_RR_1995)
+summary(modelBV_RR_1996)
+summary(modelBV_RR_2006)
+summary(modelBV_RR_2007)
+summary(modelBV_RR_2008)
+summary(modelBV_RR_2009)
+summary(modelBV_RR_2010)
+summary(modelBV_RR_2011)
+summary(modelBV_RR_2012)
+summary(modelBV_RR_2013)
+summary(modelBV_RR_2014)
+summary(modelBV_RR_2015)
+summary(modelBV_RR_2016)
+summary(modelBV_RR_2017)
+```
+
+### Number of observations
+
+```{r MCMCglmm models 3}
+nobs(modelBV_RR_1987)
+nobs(modelBV_RR_1988)
+nobs(modelBV_RR_1989)
+nobs(modelBV_RR_1990)
+nobs(modelBV_RR_1991)
+nobs(modelBV_RR_1992)
+nobs(modelBV_RR_1993)
+nobs(modelBV_RR_1994)
+nobs(modelBV_RR_1995)
+nobs(modelBV_RR_1996)
+nobs(modelBV_RR_2006)
+nobs(modelBV_RR_2007)
+nobs(modelBV_RR_2008)
+nobs(modelBV_RR_2009)
+nobs(modelBV_RR_2010)
+nobs(modelBV_RR_2011)
+nobs(modelBV_RR_2012)
+nobs(modelBV_RR_2013)
+nobs(modelBV_RR_2014)
+nobs(modelBV_RR_2015)
+nobs(modelBV_RR_2016)
+nobs(modelBV_RR_2017)
+```
+
