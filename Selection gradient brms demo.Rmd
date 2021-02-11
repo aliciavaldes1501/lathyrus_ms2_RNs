@@ -1,0 +1,237 @@
+---
+title: "Selection gradients brms demo"
+author: "Pieter Arnold"
+date: "15/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, echo=FALSE, warning=FALSE}
+library(brms)
+library(MCMCglmm)
+library(ggplot2)
+library(ggpubr)
+library(mgcv)
+library(sjPlot)
+
+```
+
+``` {r load data, echo=FALSE} 
+F3data <- read.csv("C:/Users/u1058369/Dropbox/Pieter/ANU/Wahlenbergia project/F3 experiment 2019/F3 wahli analyses R/1_F3.1_dataset_20201110.csv")
+
+F3data$F3ID <- as.factor(F3data$F3ID)
+F3data$UniqueID <- as.factor(F3data$UniqueID)
+F3data$Block2 <- as.factor(F3data$Block2)
+F3data$F3_line <- as.factor(F3data$F3_line)
+F3data$F2_mum <- as.factor(F3data$F2_mum)
+F3data$F2_dad <- as.factor(F3data$F2_dad)
+F3data$Maternal_temp <- as.factor(F3data$Maternal_temp)
+F3data$Growth_treatment <- as.factor(F3data$Growth_treatment)
+F3data$Line <- as.factor(F3data$Line)
+F3data$Temp <- 1
+F3data$Temp[1:576] <- 30
+F3data$Temp[577:1152] <- 20
+F3data$cTemp <- scale(F3data$Temp)
+F3data$animal <- F3data$Line
+F3data$Parents_cross <- as.factor(F3data$Parents_cross)
+F3data$Selfed_not <- as.factor(F3data$Selfed_not)
+
+F3data$Days_first_flower <-  as.Date(F3data$Date_first_flower, format = "%Y%m%d") - as.Date("7/11/19", format = "%d/%m/%y")
+F3data$Days_first_flower <- as.numeric(F3data$Days_first_flower)
+
+F3data <- subset(F3data, F3data$Maternal_temp!="")
+str(F3data)
+
+```
+
+
+``` {r brms and stan settings}
+
+# Stan stuff
+options(mc.cores = parallel::detectCores())
+
+options(buildtools.check = function(action) TRUE)
+CHAINS <- 4
+ITER <- 4000
+WARMUP <- 2000
+BAYES.SEED <- 21
+
+```
+
+
+
+```{r bivariate model}
+dff.trait <- bf(Days_first_flower ~ cTemp + Maternal_temp + Selfed_not + Block + 
+                  (1+cTemp|2|Line) + (1|Block:Row) + (1|Block:Column)) +
+  gaussian()
+
+dff.fit   <- bf(log(Total_repro_stems+1) ~  cTemp + Maternal_temp + Selfed_not + Block + 
+                  (1|2|Line) + (1|Block:Row) + (1|Block:Column)) +
+  gaussian()
+
+
+# Bivariate (Trait, fitness) model
+dff.mv <- brm(dff.trait + dff.fit + set_rescor(rescor = TRUE), data = F3data,
+              chains = CHAINS, iter = ITER, warmup = WARMUP,
+              control = list(adapt_delta = 0.99, max_treedepth = 15), seed = BAYES.SEED)
+summary(dff.mv)
+
+
+```
+
+``` {r Selection differentials and gradients}
+
+##Extract posterior samples
+dff.mvpost <- posterior_samples(dff.mv, pars = c("^b", "^sd", "cor", "sigma"))
+dff.mvpost <- as.mcmc(dff.mvpost)
+head(dff.mvpost)
+# [,13] = sd_Line__Daysfirstflower_Intercept 
+# [,14] = sd_Line__Daysfirstflower_Growth_treatmentWarm
+# [,15] = sd_Line__Totalreprostems_Intercept 
+# [,18] = cor_Line__Daysfirstflower_Intercept__Daysfirstflower_Growth_treatmentWarm
+# [,19] = cor_Line__Daysfirstflower_Intercept__Totalreprostems_Intercept
+# [,20] = cor_Line__Daysfirstflower_Growth_treatmentWarm__Totalreprostems_Intercept
+# [,21] = rescor__Daysfirstflower__Totalreprostems
+# [,22] = sigma_Daysfirstflower
+# [,23] = sigma_Totalreprostems
+
+# Get residual G matrix
+resGmat <- matrix(rep(0, 3*3), ncol = 3)
+diag(resGmat) <- apply(dff.mvpost[,13:15]^2, 2, mean) #genetic variances on diagonal
+resGmat
+resGmat[1,2] <- mean(dff.mvpost[,13]*dff.mvpost[,14]*dff.mvpost[,18]) #Genetic covariances on upper diagonal
+resGmat[1,3] <- mean(dff.mvpost[,13]*dff.mvpost[,15]*dff.mvpost[,19])
+resGmat[2,3] <- mean(dff.mvpost[,14]*dff.mvpost[,15]*dff.mvpost[,20])
+##genetic correlations on lower diagonal
+resGmat[2,1] <- mean(dff.mvpost[,18])
+resGmat[3,1] <- mean(dff.mvpost[,19])
+resGmat[3,2] <- mean(dff.mvpost[,20])
+
+resGmat
+
+# Get 95%CI on G matrix
+##lower bounds of 95% HPDI
+resGmat.low <- matrix(rep(0, 3*3), ncol = 3)
+diag(resGmat.low) <- HPDinterval(dff.mvpost[,13:15]^2, prob = 0.95)[,1]
+
+resGmat.low
+resGmat.low[1,2] <- HPDinterval(dff.mvpost[,13]*dff.mvpost[,14]*dff.mvpost[,18], prob = 0.95)[,1]
+resGmat.low[1,3] <- HPDinterval(dff.mvpost[,13]*dff.mvpost[,15]*dff.mvpost[,19], prob = 0.95)[,1]
+resGmat.low[2,3] <- HPDinterval(dff.mvpost[,14]*dff.mvpost[,15]*dff.mvpost[,20], prob = 0.95)[,1]
+##genetic correlations on lower diagonal
+resGmat.low[2,1] <- HPDinterval(dff.mvpost[,18], prob = 0.95)[,1]
+resGmat.low[3,1] <- HPDinterval(dff.mvpost[,19], prob = 0.95)[,1]
+resGmat.low[3,2] <- HPDinterval(dff.mvpost[,20], prob = 0.95)[,1]
+
+resGmat.low
+
+##upper bounds of 95% HPDI
+resGmat.up <- matrix(rep(0, 3*3), ncol = 3)
+diag(resGmat.up) <- HPDinterval(dff.mvpost[,13:15]^2, prob = 0.95)[,2]
+
+resGmat.up
+resGmat.up[1,2] <- HPDinterval(dff.mvpost[,13]*dff.mvpost[,14]*dff.mvpost[,18], prob = 0.95)[,2]
+resGmat.up[1,3] <- HPDinterval(dff.mvpost[,13]*dff.mvpost[,15]*dff.mvpost[,19], prob = 0.95)[,2]
+resGmat.up[2,3] <- HPDinterval(dff.mvpost[,14]*dff.mvpost[,15]*dff.mvpost[,20], prob = 0.95)[,2]
+##genetic correlations on lower diagonal
+resGmat.up[2,1] <- HPDinterval(dff.mvpost[,18], prob = 0.95)[,2]
+resGmat.up[3,1] <- HPDinterval(dff.mvpost[,19], prob = 0.95)[,2]
+resGmat.up[3,2] <- HPDinterval(dff.mvpost[,20], prob = 0.95)[,2]
+
+resGmat.up
+
+resGmat.low
+resGmat
+resGmat.up
+
+##G-matrix (means only) that contains only genetic variances and covariances
+##Take upper triangle and replace lower triangle
+Gmat <- resGmat
+Gmat[2,1] <- Gmat[1,2]
+Gmat[3,1] <- Gmat[1,3]
+Gmat[3,2] <- Gmat[2,3]
+Gmat
+
+# Selection differentials to gradients
+S.dff <- Gmat[1:2,3]
+P2.dff <- Gmat[1:2,1:2]
+solve(P2.dff) %*% S.dff
+
+
+###Sampling G-matrices from the posterior to calculate intervals estimates
+#Use all posterior samples (no need to sample a random subset)
+#Result is list with G-matrix
+sample.gmat <- function(data, replicates = 5000) {
+  
+  ##Initialize the results list (list of lists)
+  foo <- list(gmat = matrix(rep(0,3*3), ncol = 3))
+  results.list <- list()
+  for(j in 1:replicates) { results.list[[j]] <- foo }
+  
+  for(i in 1:replicates) {
+    diag(results.list[[i]]$gmat) <- data[i,13:15]^2 #Get the diagonal
+    
+    #Upper diagonal
+    results.list[[i]]$gmat[1,2] <- data[i,13]*data[i,14]*data[i,18]
+    results.list[[i]]$gmat[1,3] <- data[i,13]*data[i,15]*data[i,19]
+    results.list[[i]]$gmat[2,3] <- data[i,14]*data[i,15]*data[i,20]
+    
+    #Lower diagonal
+    results.list[[i]]$gmat[2,1] <- results.list[[i]]$gmat[1,2]
+    results.list[[i]]$gmat[3,1] <- results.list[[i]]$gmat[1,3]
+    results.list[[i]]$gmat[3,2] <- results.list[[i]]$gmat[2,3]
+    
+  }
+  
+  return(results.list)
+}
+
+sampled.gmat <- sample.gmat(dff.mvpost, replicates = 1000) 
+sampled.gmat[[2]]
+sgmat <- lapply(sampled.gmat, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat <- unname(sapply(sgmat, '[[', 1)) #Change to matrix
+str(sgmat)
+sgmat <- t(sgmat)
+
+
+P.modelBV_RR <- sgmat
+P.modelBV_RR.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR.mode[k] <- posterior.mode(mcmc(sgmat[,k]))
+P.modelBV_RR.mode
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR <- sgmat[,c(3,6)]
+#S.modelBV_RR <- t(S.modelBV_RR)
+#S.modelBV_RR <- P.modelBV_RR[c(3,6),]
+colnames(S.modelBV_RR) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR.mode <- P.modelBV_RR.mode[1:2, 3]
+S.modelBV_RR.mode
+posterior.mode(mcmc(S.modelBV_RR))
+HPDinterval(mcmc(S.modelBV_RR))
+
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+n <- nrow(S.modelBV_RR)   # sample size
+beta_post_RR <- matrix(NA, n ,2)
+
+for (i in 1:nrow(S.modelBV_RR)) {
+  P3 <- matrix(rep(NA, 9), nrow = 3)  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3[k] <- P.modelBV_RR[i, k] }  
+  P2 <- P3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S <- P3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR[i,] <- solve(P2) %*% S   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR))
+HPDinterval(mcmc(beta_post_RR))
+
+
+```
+
