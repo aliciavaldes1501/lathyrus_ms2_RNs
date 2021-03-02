@@ -1,0 +1,1719 @@
+---
+title: "Lathyrus ms2: selection on reaction norms for flowering time"
+subtitle: "Models with all data performed with brms"
+author : "Alicia Valdés"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(MCMCglmm)
+library(brms)
+library(beepr)
+library(ggthemes)
+library(knitr)
+library(bayesplot)
+library(tidybayes)
+library(parallel)
+library(future)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r load models, include=FALSE}
+# Load previously run models and stuff
+load("output/large_objects.RData")
+```
+
+# Read data and check ns
+
+```{r}
+datadef<-read.csv("data/datadef.csv") 
+head(datadef)
+```
+
+Number of individuals in each period:
+
+```{r}
+length(with(subset(datadef,period=="old"),unique(id)))
+length(with(subset(datadef,period=="new"),unique(id)))
+```
+
+Number of observations in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"))
+nrow(subset(datadef,period=="new"))
+```
+
+Number of cases with FFD in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"&!is.na(FFD)))
+nrow(subset(datadef,period=="new"&!is.na(FFD)))
+```
+
+# Data preparation
+
+```{r data prep MCMCglmm, message=FALSE, warning=FALSE}
+datadef_total<-datadef %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr (0.87)
+
+# Calculate mean shoot volume for each id using values of shoot volume 
+# for all ids/years (including flowering and non-flowering years)
+
+shoot_vol_all_means<-datadef[c(1,3,10)]%>%
+  group_by(id)%>%
+  summarise(shoot_vol_mean=mean(shoot_vol,na.rm=T)) 
+# Mean of all available values 
+
+# Join shoot volume data
+datadef_total<-datadef_total%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef[c(2,3,11)]))
+head(datadef_total)
+nrow(subset(datadef_total,is.na(shoot_vol_mean))) 
+# 46 ids with no info on shoot volume
+
+# Add first_yr to total data + 
+# Year column is only relevant for FFD, but is set to first_yr for fitness values
+datadef_total$first_yr<-ifelse(grepl("old",as.character(datadef_total$id)),
+                               1987,2006)
+
+# Using sqrt of mean shoot volume over all years when available, centered
+datadef_total<-datadef_total%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=scale(shoot_vol_mean_sqrt,center=T,scale=F))
+```
+
+Compare distributions of mean fitness per year of study and mean fitness per flowering event between old and new periods:
+
+```{r message=FALSE, warning=FALSE}
+ggplot(datadef_total,aes(x=mean_fitness_study))+
+  geom_histogram(colour="black",fill="white",position="dodge")+
+  facet_wrap(~period,scales="free_y")+
+  geom_vline(data=plyr::ddply(datadef_total,"period",summarise,
+                        mean_fitness_study.mean=mean(mean_fitness_study)),
+             aes(xintercept=mean_fitness_study.mean),
+             linetype="dashed", size=1, colour="red")
+ggplot(datadef_total,aes(x=mean_fitness_fl))+
+  geom_histogram(colour="black",fill="white",position="dodge")+
+  facet_wrap(~period,scales="free_y")+
+  geom_vline(data=plyr::ddply(datadef_total,"period",summarise,
+                        mean_fitness_fl.mean=mean(mean_fitness_fl)),
+             aes(xintercept=mean_fitness_fl.mean),
+             linetype="dashed", size=1, colour="red")
+```
+
+Distributions and means of the two mean fitness measures are similar among the two periods.
+
+# Univariate models
+
+## FFD with random effect of year only
+
+```{r}
+my.cores <- detectCores()
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+univar.FFD_yearonly.all.brm<-brm(formula=FFD~cmean_4+(1|year),data=datadef,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm)
+```
+
+## FFD with random effects of year and individual-intercept
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+univar.FFD.all.brm<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm)
+```
+
+## Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope
+
+```{r, eval=FALSE, include=TRUE}
+univar.FFD_RR.all.brm<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm) 
+```
+
+## Compare models
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm <- add_criterion(univar.FFD_yearonly.all.brm,"loo")
+univar.FFD.all.brm <- add_criterion(univar.FFD.all.brm,"loo")
+univar.FFD_RR.all.brm <- add_criterion(univar.FFD_RR.all.brm,"loo")
+```
+
+```{r}
+loo_comp<-loo_compare(univar.FFD_yearonly.all.brm,univar.FFD.all.brm,
+                      univar.FFD_RR.all.brm, criterion="loo")
+```
+
+```{r}
+loo_comp
+```
+
+Random regression model is better
+
+## Model evaluation
+
+From https://biol609.github.io/lectures/23c_brms_prediction.html#24_evaluating_brms_models
+
+```{r fig.height=8, fig.width=6}
+plot(univar.FFD_yearonly.all.brm) 
+plot(univar.FFD.all.brm) 
+plot(univar.FFD_RR.all.brm) 
+```
+
+Rhat (potential scale reduction statistic): monitors whether a chain has converged to the equilibrium distribution by comparing its behavior to other randomly initialized chains.
+
+-   light: below 1.05 (good)
+
+-   mid: between 1.05 and 1.1 (ok)
+
+-   dark: above 1.1 (too high)
+
+```{r}
+mcmc_rhat_hist(rhat(univar.FFD_yearonly.all.brm))+theme_bw()
+mcmc_rhat_hist(rhat(univar.FFD.all.brm))+theme_bw()
+mcmc_rhat_hist(rhat(univar.FFD_RR.all.brm))+theme_bw()
+```
+
+Effective sample size: an estimate of the number of independent draws from the posterior distribution of the estimand of interest.
+
+-   light: between 0.5 and 1 (high)
+
+-   mid: between 0.1 and 0.5 (good)
+
+-   dark: below 0.1 (low)
+
+We should worry about any values less than 0.1.
+
+```{r}
+mcmc_neff_hist(neff_ratio(univar.FFD_yearonly.all.brm))+theme_bw()
+mcmc_neff_hist(neff_ratio(univar.FFD.all.brm))+theme_bw()
+mcmc_neff_hist(neff_ratio(univar.FFD_RR.all.brm))+theme_bw()
+```
+
+Autocorrelation: Takes very long / gets stuck, see later.
+
+```{r}
+# mcmc_acf(univar.FFD_RR.all.brm,lags=20)
+```
+
+Assessing fit: 
+
+Posterior predictive checks:  Compares observed data to simulated data from the posterior predictive distribution (if a model is a good fit, we should be able to use it to generate data that resemble the data that we observed).
+
+https://cran.r-project.org/web/packages/bayesplot/vignettes/graphical-ppcs.html#:~:text=MCMC%20diagnostics%20vignette.-,Graphical%20posterior%20predictive%20checks%20(PPCs),Gabry%20et%20al%2C%202019).
+
+```{r}
+y1<-subset(datadef,!is.na(FFD))$FFD # vector of outcome values
+yrep1<-posterior_predict(univar.FFD_yearonly.all.brm, draws = 500)
+yrep2<-posterior_predict(univar.FFD.all.brm, draws = 500)
+yrep3<-posterior_predict(univar.FFD_RR.all.brm, draws = 500)
+# matrices of draws from the posterior predictive distribution
+```
+
+Each row of the matrix is a draw from the posterior predictive distribution, i.e. a vector with one element for each of the data points in y.
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y1, yrep1[1:500,])
+ppc_dens_overlay(y1, yrep2[1:500,])
+ppc_dens_overlay(y1, yrep3[1:500,])
+```
+
+Separate histograms of y and some of the yrep datasets
+
+```{r}
+ppc_hist(y1, yrep1[1:8, ])
+ppc_hist(y1, yrep2[1:8, ])
+ppc_hist(y1, yrep3[1:8, ])
+```
+
+Is this good enough?
+
+```{r message=FALSE, warning=FALSE}
+ppc_stat(y1,yrep1,stat="median")
+ppc_stat(y1,yrep2,stat="median")
+ppc_stat(y1,yrep3,stat="median")
+ppc_stat(y1,yrep1,stat="mean")
+ppc_stat(y1,yrep2,stat="mean")
+ppc_stat(y1,yrep3,stat="mean")
+ppc_stat(y1,yrep1,stat="sd")
+ppc_stat(y1,yrep2,stat="sd")
+ppc_stat(y1,yrep3,stat="sd")
+ppc_stat(y1,yrep1,stat="max")
+ppc_stat(y1,yrep2,stat="max")
+ppc_stat(y1,yrep3,stat="max")
+ppc_stat(y1,yrep1,stat="min")
+ppc_stat(y1,yrep2,stat="min")
+ppc_stat(y1,yrep3,stat="min")
+```
+
+This looks quite OK (worst is for the min).
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm)
+bayes_R2(univar.FFD.all.brm)
+bayes_R2(univar.FFD_RR.all.brm)
+```
+
+Leave-one-out cross validation (LOO): 
+
+From https://www.monicaalexander.com/posts/2020-28-02-bayes_viz/
+
+We are interested in estimating the out-of-sample predictive accuracy at each point i, when all we have to fit the model is data that without point i. We want to estimate the leave-one-out (LOO) posterior predictive densities and a summary of these across all points, which is called the LOO expected log pointwise predictive density. The bigger the numbers, the better we are at predicting the left out point i.
+
+The output mentions Pareto k estimates, which give an indication of how 'influential' each point is. The higher the value of k, the more influential the point. Values of k over 0.7 are not good, and suggest the need for model re-specification. 
+
+```{r eval=FALSE, include=FALSE}
+loo1 <- loo(univar.FFD_RR.all.brm, save_psis = TRUE)
+# Not sure what the warming means
+```
+
+```{r}
+plot(loo1)
+```
+
+We have 3 obs with k > 0.7 - how bad is this?
+
+Is this OK?
+
+## Extract BLUPs from random regression model
+
+Code was checked by Piet.
+
+```{r}
+BLUPs_MCMC.all.brms  <- cbind(as.factor(c(1:837)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm)$id)
+                              [c(1,5)])
+colnames(BLUPs_MCMC.all.brms) <- c("id", "intercept", "slope")
+with(BLUPs_MCMC.all.brms,cor(intercept,slope)) # highly correlated!
+```
+
+Plots with BLUPs
+
+```{r, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(BLUPs_MCMC.all.brms, aes(id, intercept)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("BLUP intercept estimate") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  theme(axis.text.x = element_blank())
+```
+
+```{r, echo=FALSE, fig.height=4, fig.width=10}
+ggplot(BLUPs_MCMC.all.brms, aes(id, slope)) + 
+  geom_point(aes(group = id, colour = id), size = 4, alpha = 0.5) + 
+  ylab("Plasticity (BLUP slope estimate)") +
+  geom_hline(yintercept = 0, lty = 2) + my_theme() +
+  theme(axis.text.x = element_blank())
+```
+
+```{r, echo=FALSE, fig.height=4, fig.width=10}
+BLUPs_MCMC.all.brms$id_ordered <- factor(BLUPs_MCMC.all.brms$id,
+                                    levels = BLUPs_MCMC.all.brms$id[order(BLUPs_MCMC.all.brms$slope)])
+ggplot(BLUPs_MCMC.all.brms, aes(id_ordered, slope)) +
+  geom_bar(stat = "identity", aes(group = id, fill = id)) +
+  xlab("Id (in ranked order of plasticity)") +
+  ylab("Plasticity (BLUP slope estimate)") +
+  my_theme() + theme(axis.text.x = element_blank())
+```
+
+# Bivariate models
+
+## 1. mean_fitness_fl, no condition variable
+
+Using the ID-syntax to specify fitness to be correlated with the intercept and slope of FFD on temperature - code has been checked by Piet.
+
+Regarding distributions, I tried Poisson distribution for fitness, but not sure how eventual overdispersion is handled. I also tried adding an observation-level random effect, and using a negative binomial distribution. Results seem quite similar.
+
+### Poisson distribution
+
+```{r message=FALSE, warning=FALSE}
+datadef<-left_join(datadef,datadef_total[c(1:3,9)]) 
+# Add info on mean fitness and mean shoot volume
+bf_FFD <- bf(FFD ~ cmean_4 + (cmean_4|ID1|id) + (1|year)) # Set up model formula
+bf_fitness <- bf(round(mean_fitness_fl) ~  (1|ID1|id)) # Set up model formula
+# Specifying group-level effects of the same grouping factor (id here) 
+# to be correlated across formulas
+# Expand the | operator into |<ID>|, where <ID> can be any value (ID1 here)
+# Group-level terms with the same ID1 will be modeled as correlated 
+# if they share same grouping factor(s)
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+bivar1.all.brm.pois<-brm(bf_FFD + bf_fitness, family = c(gaussian, poisson), 
+                         data = datadef,
+                         warmup = 1000,iter = 4000,chains=4,thin=2,
+                         inits = "random",seed = 12345,cores = my.cores,
+                         save_all_pars=TRUE)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(bivar1.all.brm.pois)
+```
+
+### Negative binomial distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar1.all.brm.nb<-brm(bf_FFD + bf_fitness, family = c(gaussian, negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                         inits = "random",seed = 12345,cores = my.cores,
+                       save_all_pars=TRUE)
+```
+
+```{r}
+summary(bivar1.all.brm.nb)
+```
+
+### Model evaluation: Compare models
+
+```{r fig.height=8, fig.width=6}
+plot(bivar1.all.brm.pois) 
+plot(bivar1.all.brm.nb)
+```
+
+Rhat
+
+```{r}
+mcmc_rhat_hist(rhat(bivar1.all.brm.pois))+theme_bw()
+mcmc_rhat_hist(rhat(bivar1.all.brm.nb))+theme_bw()
+```
+
+Effective sample size: 
+
+```{r}
+mcmc_neff_hist(neff_ratio(bivar1.all.brm.pois))+theme_bw()
+mcmc_neff_hist(neff_ratio(bivar1.all.brm.nb))+theme_bw()
+```
+
+Posterior predictive checks:  
+
+```{r}
+y2_fitness<-round(subset(datadef,!is.na(FFD))$mean_fitness_fl)
+y2_FFD<-subset(datadef,!is.na(FFD))$FFD # vectors of outcome values
+yrep2_fitness_pois<-posterior_predict(bivar1.all.brm.pois, 
+                                 draws = 500,resp="roundmeanfitnessfl")
+yrep2_FFD_pois<-posterior_predict(bivar1.all.brm.pois, 
+                                 draws = 500,resp="FFD")
+yrep2_fitness_nb<-posterior_predict(bivar1.all.brm.nb, 
+                                 draws = 500,resp="roundmeanfitnessfl")
+yrep2_FFD_nb<-posterior_predict(bivar1.all.brm.nb, 
+                                 draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+```
+
+Each row of the matrix is a draw from the posterior predictive distribution, i.e. a vector with one element for each of the data points in y.
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y2_fitness, yrep2_fitness_pois[1:500,])
+ppc_dens_overlay(y2_fitness, yrep2_fitness_pois[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y2_fitness, yrep2_fitness_nb[1:500,])
+ppc_dens_overlay(y2_fitness, yrep2_fitness_nb[1:500,])+xlim(0,10)
+ppc_dens_overlay(y2_FFD, yrep2_FFD_pois[1:500,])
+ppc_dens_overlay(y2_FFD, yrep2_FFD_nb[1:500,])
+```
+
+Poisson and negative binomial look pretty similar.
+
+Separate histograms of y and some of the yrep datasets
+
+```{r}
+ppc_hist(y2_fitness, yrep2_fitness_pois[1:8, ])
+ppc_hist(y2_fitness, yrep2_fitness_pois[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+ppc_hist(y2_fitness, yrep2_fitness_nb[1:8, ])
+ppc_hist(y2_fitness, yrep2_fitness_nb[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+```
+
+Here, negative binomial looks a bit better for fitness.
+
+```{r message=FALSE, warning=FALSE}
+ppc_stat(y2_fitness, yrep2_fitness_pois,stat="median")
+ppc_stat(y2_fitness, yrep2_fitness_nb,stat="median")
+ppc_stat(y2_fitness, yrep2_fitness_pois,stat="mean")
+ppc_stat(y2_fitness, yrep2_fitness_nb,stat="mean")
+ppc_stat(y2_fitness, yrep2_fitness_pois,stat="sd")
+ppc_stat(y2_fitness, yrep2_fitness_nb,stat="sd")
+ppc_stat(y2_fitness, yrep2_fitness_pois,stat="max")
+ppc_stat(y2_fitness, yrep2_fitness_nb,stat="max")
+```
+
+Look at the distribution of the proportion of zeros over the replicated datasets from the posterior predictive distribution in yrep and compare to the proportion of observed zeros in y.
+
+```{r}
+# Define a function that takes a vector as input
+# and returns the proportion of zeros:
+prop_zero <- function(x) mean(x == 0)
+prop_zero(y2_fitness) # check proportion of zeros in y
+```
+
+```{r}
+ppc_stat(y2_fitness, yrep2_fitness_pois, stat = "prop_zero", binwidth = 0.005)
+ppc_stat(y2_fitness, yrep2_fitness_nb, stat = "prop_zero", binwidth = 0.005)
+```
+
+They look quite similar.
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar1.all.brm.pois)
+bayes_R2(bivar1.all.brm.nb)
+```
+
+Very similar.
+
+Widely Applicable Information Criterion (WAIC):
+
+```{r}
+waic1<-waic(bivar1.all.brm.pois,bivar1.all.brm.nb,compare=T)
+```
+
+```{r}
+waic1
+```
+
+Suggests that poisson is a bit better, but not sure we can trust this.
+
+Leave-one-out cross validation (LOO): 
+
+```{r eval=FALSE, include=FALSE}
+loo2_pois <- loo(bivar1.all.brm.pois, save_psis = TRUE, moment_match = TRUE)
+loo2_nb <- loo(bivar1.all.brm.nb, save_psis = TRUE, moment_match = TRUE)
+```
+
+Some Pareto k diagnostic values are too high. See help('pareto-k-diagnostic') for details.
+Found 263 observations with a pareto_k > 0.7 in model 'bivar1.all.brm.pois'. With this many problematic observations, it may be more appropriate to use 'kfold' with argument 'K = 10' to perform 10-fold cross-validation rather than LOO.
+
+```{r}
+loo_compare(loo2_pois,loo2_nb)
+```
+
+Suggests that poisson is a bit better, but not sure we can trust this.
+
+```{r}
+plot(loo2_pois)
+plot(loo2_nb)
+```
+
+LOO predictive checks
+
+```{r}
+ppc_loo_pit_overlay(y2_fitness, yrep2_fitness_pois, 
+                    lw = weights(loo2_pois$psis_object))
+ppc_loo_pit_qq(y2_fitness, yrep2_fitness_pois, 
+                    lw = weights(loo2_pois$psis_object))
+ppc_loo_pit_qq(y2_fitness, yrep2_fitness_pois, 
+                    lw = weights(loo2_pois$psis_object),compare="normal")
+ppc_loo_pit_overlay(y2_fitness, yrep2_fitness_nb, 
+                    lw = weights(loo2_nb$psis_object))
+ppc_loo_pit_qq(y2_fitness, yrep2_fitness_nb, 
+                    lw = weights(loo2_nb$psis_object))
+ppc_loo_pit_qq(y2_fitness, yrep2_fitness_nb, 
+                    lw = weights(loo2_nb$psis_object),compare="normal")
+```
+
+All looking quite bad!
+
+k-fold cross-validation (K=5):
+
+```{r eval=FALSE, include=FALSE}
+kfold1_pois<-kfold(bivar1.all.brm.pois,K=5,chains=1,cores=my.cores)
+kfold1_nb<-kfold(bivar1.all.brm.nb,K=5,chains=1,cores=my.cores)
+```
+
+```{r}
+loo_compare(kfold1_pois,kfold1_nb)
+```
+
+Suggests that poisson is a bit better, and I guess we can trust this one as it gave no warnings?.
+
+### Prior predictive checks
+
+Not sure what I am doing here...
+
+```{r eval=FALSE, include=FALSE}
+prior1<-c(set_prior("normal(0,1000)", class = "b"),
+          set_prior("student_t(3, 58.6, 6.6)", class = "Intercept",resp="FFD"),
+          set_prior("student_t(3, 1.4, 2.5)",class = "Intercept",
+                    resp="roundmeanfitnessfl"))
+bivar1.all.brm.pois_priors<-brm(bf_fitness + bf_FFD,
+       family = c(poisson, gaussian), data = datadef,
+       prior = prior1,
+                         warmup = 1000,iter = 4000,chains=4,thin=2,
+                         inits = "random",seed = 12345,cores = my.cores,
+                         sample_prior="only")
+```
+
+
+```{r}
+yrep2_fitness_pois_priors<-posterior_predict(bivar1.all.brm.pois_priors, 
+                                 draws = 500,resp="roundmeanfitnessfl")
+yrep2_FFD_pois_priors<-posterior_predict(bivar1.all.brm.pois_priors, 
+                                 draws = 500,resp="FFD")
+# matrices of draws from the posterior(prior??) predictive distribution
+```
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y2_fitness, yrep2_fitness_pois_priors[1:500,])
+ppc_dens_overlay(y2_fitness, yrep2_fitness_pois_priors[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y2_FFD, yrep2_FFD_pois_priors[1:500,])
+```
+
+### Extract selection coefficients
+
+#### Poisson model
+
+Using example code from Piet. I am not sure what I am doing here! The selection differentials and gradients are not so different from those obtained from MCMCglmm models so this is maybe right, but the code would need to be revised.
+
+```{r}
+# Extract posterior samples
+bivar1.all.brm.pois_post <- posterior_samples(bivar1.all.brm.pois)
+bivar1.all.brm.pois_post <- as.mcmc(bivar1.all.brm.pois_post)
+#head(bivar1.all.brm.pois_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+# Sampling G-matrices from the posterior to calculate intervals estimates
+# Use all posterior samples (no need to sample a random subset)
+# Result is list with G-matrix
+sample.gmat1 <- function(data, replicates = 5000) {
+  
+  ##Initialize the results list (list of lists)
+  foo <- list(gmat = matrix(rep(0,3*3), ncol = 3))
+  results.list <- list()
+  for(j in 1:replicates) { results.list[[j]] <- foo }
+  
+  for(i in 1:replicates) {
+    diag(results.list[[i]]$gmat) <- data[i,4:6]^2 #Get the diagonal
+    
+    #Upper diagonal
+    results.list[[i]]$gmat[1,2] <- data[i,4]*data[i,5]*data[i,8]
+    results.list[[i]]$gmat[1,3] <- data[i,4]*data[i,6]*data[i,9]
+    results.list[[i]]$gmat[2,3] <- data[i,5]*data[i,6]*data[i,10]
+    
+    #Lower diagonal
+    results.list[[i]]$gmat[2,1] <- results.list[[i]]$gmat[1,2]
+    results.list[[i]]$gmat[3,1] <- results.list[[i]]$gmat[1,3]
+    results.list[[i]]$gmat[3,2] <- results.list[[i]]$gmat[2,3]
+    
+  }
+  
+  return(results.list)
+}
+
+sampled.gmat1 <- sample.gmat1(bivar1.all.brm.pois_post, replicates = 1000) 
+sampled.gmat1[[2]]
+```
+
+```{r}
+sgmat1 <- lapply(sampled.gmat1, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat1 <- unname(sapply(sgmat1, '[[', 1)) #Change to matrix
+str(sgmat1)
+```
+
+
+```{r}
+sgmat1 <- t(sgmat1)
+
+P.modelBV_RR1 <- sgmat1
+P.modelBV_RR1.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR1.mode[k] <- posterior.mode(mcmc(sgmat1[,k]))
+P.modelBV_RR1.mode
+```
+
+```{r}
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR1 <- sgmat1[,c(3,6)]
+colnames(S.modelBV_RR1) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR1.mode <- P.modelBV_RR1.mode[1:2, 3]
+S.modelBV_RR1.mode
+```
+
+```{r}
+posterior.mode(mcmc(S.modelBV_RR1))
+```
+
+```{r}
+HPDinterval(mcmc(S.modelBV_RR1))
+```
+
+```{r}
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR1 <- matrix(NA, nrow(S.modelBV_RR1) ,2)
+
+for (i in 1:nrow(S.modelBV_RR1)) {
+  P3_1 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_1[k] <- P.modelBV_RR1[i, k] }  
+  P2_1 <- P3_1[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S1 <- P3_1[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR1[i,] <- solve(P2_1) %*% S1   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR1) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR1))
+```
+
+```{r}
+HPDinterval(mcmc(beta_post_RR1))
+```
+
+#### Negative binomial model
+
+```{r}
+# Extract posterior samples
+bivar1.all.brm.nb_post <- posterior_samples(bivar1.all.brm.nb)
+bivar1.all.brm.nb_post <- as.mcmc(bivar1.all.brm.nb_post)
+#head(bivar1.all.brm.nb_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat2 <- sample.gmat1(bivar1.all.brm.nb_post, replicates = 1000) 
+sampled.gmat2[[2]]
+```
+
+```{r}
+sgmat2 <- lapply(sampled.gmat2, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat2 <- unname(sapply(sgmat2, '[[', 1)) #Change to matrix
+str(sgmat2)
+```
+
+
+```{r}
+sgmat2 <- t(sgmat2)
+
+P.modelBV_RR2 <- sgmat2
+P.modelBV_RR2.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR2.mode[k] <- posterior.mode(mcmc(sgmat2[,k]))
+P.modelBV_RR2.mode
+```
+
+```{r}
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR2 <- sgmat2[,c(3,6)]
+colnames(S.modelBV_RR2) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR2.mode <- P.modelBV_RR2.mode[1:2, 3]
+S.modelBV_RR2.mode
+```
+
+```{r}
+posterior.mode(mcmc(S.modelBV_RR2))
+```
+
+```{r}
+HPDinterval(mcmc(S.modelBV_RR2))
+```
+
+```{r}
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR2 <- matrix(NA, nrow(S.modelBV_RR2) ,2)
+
+for (i in 1:nrow(S.modelBV_RR2)) {
+  P3_2 <- matrix(rep(NA, 9), nrow = 3)  
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_2[k] <- P.modelBV_RR2[i, k] }  
+  P2_2 <- P3_2[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S2 <- P3_2[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR2[i,] <- solve(P2_2) %*% S2   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR2) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR2))
+```
+
+```{r}
+HPDinterval(mcmc(beta_post_RR2))
+```
+
+## 2. mean_fitness_fl, with shoot volume
+
+```{r message=FALSE, warning=FALSE}
+bf_fitness_shoot <- bf(round(mean_fitness_fl) ~  cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+```
+
+### Poisson distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.pois<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian, poisson), 
+                       data = datadef,warmup = 2000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+summary(bivar2.all.brm.pois)
+```
+
+Due to these warnings, results of bivar2.all.brm.pois are probably not reliable!
+Try RERUN with above specifications.
+
+### Negative binomial distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(bivar2.all.brm.nb)
+```
+
+No warnings! :)
+
+### Model evaluation: Compare models
+
+```{r fig.height=8, fig.width=6}
+plot(bivar2.all.brm.pois) 
+plot(bivar2.all.brm.nb)
+```
+
+Rhat
+
+```{r}
+mcmc_rhat_hist(rhat(bivar2.all.brm.pois))+theme_bw()
+mcmc_rhat_hist(rhat(bivar2.all.brm.nb))+theme_bw()
+```
+
+Effective sample size: 
+  
+```{r}
+mcmc_neff_hist(neff_ratio(bivar2.all.brm.pois))+theme_bw()
+mcmc_neff_hist(neff_ratio(bivar2.all.brm.nb))+theme_bw()
+```
+
+Posterior predictive checks:  
+  
+```{r}
+y3_fitness<-round(subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$mean_fitness_fl)
+y3_FFD<-subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$FFD 
+# vectors of outcome values
+yrep3_fitness_pois<-posterior_predict(bivar2.all.brm.pois, 
+                                      draws = 500,resp="roundmeanfitnessfl")
+yrep3_FFD_pois<-posterior_predict(bivar2.all.brm.pois, 
+                                  draws = 500,resp="FFD")
+yrep3_fitness_nb<-posterior_predict(bivar2.all.brm.nb, 
+                                    draws = 500,resp="roundmeanfitnessfl")
+yrep3_FFD_nb<-posterior_predict(bivar2.all.brm.nb, 
+                                draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+```
+
+Each row of the matrix is a draw from the posterior predictive distribution, i.e. a vector with one element for each of the data points in y.
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y3_fitness, yrep3_fitness_pois[1:500,])
+ppc_dens_overlay(y3_fitness, yrep3_fitness_pois[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y3_fitness, yrep3_fitness_nb[1:500,])
+ppc_dens_overlay(y3_fitness, yrep3_fitness_nb[1:500,])+xlim(0,10)
+ppc_dens_overlay(y3_FFD, yrep3_FFD_pois[1:500,])
+ppc_dens_overlay(y3_FFD, yrep3_FFD_nb[1:500,])
+```
+
+Poisson and negative binomial look pretty similar.
+
+Separate histograms of y and some of the yrep datasets
+
+```{r}
+ppc_hist(y3_fitness, yrep3_fitness_pois[1:8, ])
+ppc_hist(y3_fitness, yrep3_fitness_pois[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+ppc_hist(y3_fitness, yrep3_fitness_nb[1:8, ])
+ppc_hist(y3_fitness, yrep3_fitness_nb[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+```
+
+```{r message=FALSE, warning=FALSE}
+ppc_stat(y3_fitness, yrep3_fitness_pois,stat="median")
+ppc_stat(y3_fitness, yrep3_fitness_nb,stat="median")
+ppc_stat(y3_fitness, yrep3_fitness_pois,stat="mean")
+ppc_stat(y3_fitness, yrep3_fitness_nb,stat="mean")
+ppc_stat(y3_fitness, yrep3_fitness_pois,stat="sd")
+ppc_stat(y3_fitness, yrep3_fitness_nb,stat="sd")
+ppc_stat(y3_fitness, yrep3_fitness_pois,stat="max")
+ppc_stat(y3_fitness, yrep3_fitness_nb,stat="max")
+```
+
+Look at the distribution of the proportion of zeros over the replicated datasets from the posterior predictive distribution in yrep and compare to the proportion of observed zeros in y.
+
+```{r}
+ppc_stat(y3_fitness, yrep3_fitness_pois, stat = "prop_zero", binwidth = 0.005)
+ppc_stat(y3_fitness, yrep3_fitness_nb, stat = "prop_zero", binwidth = 0.005)
+```
+
+They look quite similar.
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.pois)
+bayes_R2(bivar2.all.brm.nb)
+```
+
+Very similar.
+
+Leave-one-out cross validation (LOO): (not run)
+  
+```{r eval=FALSE, include=FALSE}
+# loo3_pois <- loo(bivar2.all.brm.pois, save_psis = TRUE, moment_match = TRUE)
+# loo3_nb <- loo(bivar2.all.brm.nb, save_psis = TRUE, moment_match = TRUE)
+# ```
+# 
+# ```{r eval=FALSE, include=FALSE}
+# save(loo3_pois,file="output/loo3_pois.RData")
+# save(loo3_nb,file="output/loo3_nb.RData")
+# ```
+# 
+# ```{r}
+# plot(loo3_pois)
+# plot(loo3_nb)
+# ```
+# 
+# LOO predictive checks
+# 
+# ```{r}
+# ppc_loo_pit_overlay(y2_fitness, yrep3_fitness_pois, 
+#                     lw = weights(loo3_pois$psis_object))
+# ppc_loo_pit_qq(y2_fitness, yrep3_fitness_pois, 
+#                lw = weights(loo3_pois$psis_object))
+# ppc_loo_pit_qq(y2_fitness, yrep3_fitness_pois, 
+#                lw = weights(loo3_pois$psis_object),compare="normal")
+# ppc_loo_pit_overlay(y2_fitness, yrep3_fitness_nb, 
+#                     lw = weights(loo3_nb$psis_object))
+# ppc_loo_pit_qq(y2_fitness, yrep3_fitness_nb, 
+#                lw = weights(loo3_nb$psis_object))
+# ppc_loo_pit_qq(y2_fitness, yrep3_fitness_nb, 
+#                lw = weights(loo3_nb$psis_object),compare="normal")
+```
+
+### Extract selection coefficients
+
+#### Poisson model
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.pois_post <- posterior_samples(bivar2.all.brm.pois)
+bivar2.all.brm.pois_post <- as.mcmc(bivar2.all.brm.pois_post)
+#head(bivar2.all.brm.pois_post)[,1:20]
+
+# [,5] sd_id__FFD_Intercept
+# [,6] sd_id__FFD_cmean_4
+# [,7] sd_id__roundmeanfitnessfl_Intercept 
+# [,9] cor_id__FFD_Intercept__FFD_cmean_4
+# [,10] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,11] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sample.gmat2 <- function(data, replicates = 5000) {
+  
+  ##Initialize the results list (list of lists)
+  foo <- list(gmat = matrix(rep(0,3*3), ncol = 3))
+  results.list <- list()
+  for(j in 1:replicates) { results.list[[j]] <- foo }
+  
+  for(i in 1:replicates) {
+    diag(results.list[[i]]$gmat) <- data[i,5:7]^2 #Get the diagonal
+    
+    #Upper diagonal
+    results.list[[i]]$gmat[1,2] <- data[i,5]*data[i,6]*data[i,9]
+    results.list[[i]]$gmat[1,3] <- data[i,5]*data[i,7]*data[i,10]
+    results.list[[i]]$gmat[2,3] <- data[i,6]*data[i,7]*data[i,11]
+    
+    #Lower diagonal
+    results.list[[i]]$gmat[2,1] <- results.list[[i]]$gmat[1,2]
+    results.list[[i]]$gmat[3,1] <- results.list[[i]]$gmat[1,3]
+    results.list[[i]]$gmat[3,2] <- results.list[[i]]$gmat[2,3]
+    
+  }
+  
+  return(results.list)
+}
+
+sampled.gmat3 <- sample.gmat2(bivar2.all.brm.pois_post, replicates = 1000) 
+
+sgmat3 <- lapply(sampled.gmat3, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat3 <- unname(sapply(sgmat3, '[[', 1)) #Change to matrix
+
+sgmat3 <- t(sgmat3)
+
+P.modelBV_RR3 <- sgmat3
+P.modelBV_RR3.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR3.mode[k] <- posterior.mode(mcmc(sgmat3[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR3 <- sgmat3[,c(3,6)]
+colnames(S.modelBV_RR3) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR3.mode <- P.modelBV_RR3.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR3))
+HPDinterval(mcmc(S.modelBV_RR3))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR3 <- matrix(NA, nrow(S.modelBV_RR3) ,2)
+
+for (i in 1:nrow(S.modelBV_RR3)) {
+  P3_3 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_3[k] <- P.modelBV_RR3[i, k] }  
+  P2_3 <- P3_3[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S3 <- P3_3[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR3[i,] <- solve(P2_3) %*% S3   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR3) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR3))
+HPDinterval(mcmc(beta_post_RR3))
+```
+
+#### Negative binomial model
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb_post <- posterior_samples(bivar2.all.brm.nb)
+bivar2.all.brm.nb_post <- as.mcmc(bivar2.all.brm.nb_post)
+#head(bivar2.all.brm.nb_post)[,1:20]
+
+# [,5] sd_id__FFD_Intercept
+# [,6] sd_id__FFD_cmean_4
+# [,7] sd_id__roundmeanfitnessfl_Intercept 
+# [,9] cor_id__FFD_Intercept__FFD_cmean_4
+# [,10] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,11] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat4 <- sample.gmat2(bivar2.all.brm.nb_post, replicates = 1000) 
+
+sgmat4 <- lapply(sampled.gmat4, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat4 <- unname(sapply(sgmat4, '[[', 1)) #Change to matrix
+
+sgmat4 <- t(sgmat4)
+
+P.modelBV_RR4 <- sgmat4
+P.modelBV_RR4.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR4.mode[k] <- posterior.mode(mcmc(sgmat4[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR4 <- sgmat4[,c(3,6)]
+colnames(S.modelBV_RR4) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR4.mode <- P.modelBV_RR4.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR4))
+HPDinterval(mcmc(S.modelBV_RR4))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR4 <- matrix(NA, nrow(S.modelBV_RR4) ,2)
+
+for (i in 1:nrow(S.modelBV_RR4)) {
+  P3_4 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_4[k] <- P.modelBV_RR4[i, k] }  
+  P2_4 <- P3_4[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S4 <- P3_4[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR4[i,] <- solve(P2_4) %*% S4   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR4) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR4))
+HPDinterval(mcmc(beta_post_RR4))
+```
+
+## 3. mean_fitness_study, no condition variable
+
+```{r message=FALSE, warning=FALSE}
+bf_fitness_study <- bf(round(mean_fitness_study) ~  (1|ID1|id)) 
+# Set up model formula
+```
+
+### Poisson distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar3.all.brm.pois<-brm(bf_FFD+bf_fitness_study, 
+                         family = c(gaussian,poisson), 
+                         data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                         inits = "random",seed = 12345,cores = my.cores,
+                         control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(bivar3.all.brm.pois)
+```
+
+### Negative binomial distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar3.all.brm.nb<-brm(bf_FFD+bf_fitness_study, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+summary(bivar3.all.brm.nb)
+```
+
+### Model evaluation: Compare models
+
+```{r fig.height=8, fig.width=6}
+plot(bivar3.all.brm.pois) 
+plot(bivar3.all.brm.nb)
+```
+
+Rhat
+
+```{r}
+mcmc_rhat_hist(rhat(bivar3.all.brm.pois))+theme_bw()
+mcmc_rhat_hist(rhat(bivar3.all.brm.nb))+theme_bw()
+```
+
+Effective sample size: 
+  
+```{r}
+mcmc_neff_hist(neff_ratio(bivar3.all.brm.pois))+theme_bw()
+mcmc_neff_hist(neff_ratio(bivar3.all.brm.nb))+theme_bw()
+```
+
+Posterior predictive checks:  
+  
+```{r}
+y3_fitness<-round(subset(datadef,!is.na(FFD))$mean_fitness_study)
+yrep4_fitness_pois<-posterior_predict(bivar3.all.brm.pois, 
+                                      draws = 500,resp="roundmeanfitnessstudy")
+yrep4_FFD_pois<-posterior_predict(bivar3.all.brm.pois, 
+                                  draws = 500,resp="FFD")
+yrep4_fitness_nb<-posterior_predict(bivar3.all.brm.nb, 
+                                    draws = 500,resp="roundmeanfitnessstudy")
+yrep4_FFD_nb<-posterior_predict(bivar3.all.brm.nb, 
+                                draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+```
+
+Each row of the matrix is a draw from the posterior predictive distribution, i.e. a vector with one element for each of the data points in y.
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y3_fitness, yrep4_fitness_pois[1:500,])
+ppc_dens_overlay(y3_fitness, yrep4_fitness_pois[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y3_fitness, yrep4_fitness_nb[1:500,])
+ppc_dens_overlay(y3_fitness, yrep4_fitness_nb[1:500,])+xlim(0,10)
+ppc_dens_overlay(y2_FFD, yrep4_FFD_pois[1:500,])
+ppc_dens_overlay(y2_FFD, yrep4_FFD_nb[1:500,])
+```
+
+Poisson and negative binomial look pretty similar.
+
+Separate histograms of y and some of the yrep datasets
+
+```{r}
+ppc_hist(y3_fitness, yrep4_fitness_pois[1:8, ])
+ppc_hist(y3_fitness, yrep4_fitness_pois[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+ppc_hist(y3_fitness, yrep4_fitness_nb[1:8, ])
+ppc_hist(y3_fitness, yrep4_fitness_nb[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+```
+
+Here, negative binomial looks a bit better for fitness.
+
+```{r message=FALSE, warning=FALSE}
+ppc_stat(y3_fitness, yrep4_fitness_pois,stat="median")
+ppc_stat(y3_fitness, yrep4_fitness_nb,stat="median")
+ppc_stat(y3_fitness, yrep4_fitness_pois,stat="mean")
+ppc_stat(y3_fitness, yrep4_fitness_nb,stat="mean")
+ppc_stat(y3_fitness, yrep4_fitness_pois,stat="sd")
+ppc_stat(y3_fitness, yrep4_fitness_nb,stat="sd")
+ppc_stat(y3_fitness, yrep4_fitness_pois,stat="max")
+ppc_stat(y3_fitness, yrep4_fitness_nb,stat="max")
+```
+
+Look at the distribution of the proportion of zeros over the replicated datasets from the posterior predictive distribution in yrep and compare to the proportion of observed zeros in y.
+
+```{r}
+ppc_stat(y3_fitness, yrep4_fitness_pois, stat = "prop_zero", binwidth = 0.005)
+ppc_stat(y3_fitness, yrep4_fitness_nb, stat = "prop_zero", binwidth = 0.005)
+```
+
+They look quite similar.
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar3.all.brm.pois)
+bayes_R2(bivar3.all.brm.nb)
+```
+
+Very similar.
+
+Leave-one-out cross validation (LOO): (not run)
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- loo4_pois <- loo(bivar3.all.brm.pois, save_psis = TRUE, moment_match = TRUE) -->
+<!-- loo4_nb <- loo(bivar3.all.brm.nb, save_psis = TRUE, moment_match = TRUE) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- plot(loo4_pois) -->
+<!-- plot(loo4_nb) -->
+<!-- ``` -->
+
+<!-- LOO predictive checks -->
+
+<!-- ```{r} -->
+<!-- ppc_loo_pit_overlay(y3_fitness, yrep4_fitness_pois,  -->
+<!--                     lw = weights(loo4_pois$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep4_fitness_pois,  -->
+<!--                lw = weights(loo4_pois$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep4_fitness_pois,  -->
+<!--                lw = weights(loo4_pois$psis_object),compare="normal") -->
+<!-- ppc_loo_pit_overlay(y3_fitness, yrep4_fitness_nb,  -->
+<!--                     lw = weights(loo4_nb$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep4_fitness_nb,  -->
+<!--                lw = weights(loo4_nb$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep4_fitness_nb,  -->
+<!--                lw = weights(loo4_nb$psis_object),compare="normal") -->
+<!-- ``` -->
+
+### Extract selection coefficients
+
+#### Poisson model
+
+```{r}
+# Extract posterior samples
+bivar3.all.brm.pois_post <- posterior_samples(bivar3.all.brm.pois)
+bivar3.all.brm.pois_post <- as.mcmc(bivar3.all.brm.pois_post)
+#head(bivar3.all.brm.pois_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat5 <- sample.gmat1(bivar3.all.brm.pois_post, replicates = 1000) 
+
+sgmat5 <- lapply(sampled.gmat5, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat5 <- unname(sapply(sgmat5, '[[', 1)) #Change to matrix
+
+sgmat5 <- t(sgmat5)
+
+P.modelBV_RR5 <- sgmat5
+P.modelBV_RR5.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR5.mode[k] <- posterior.mode(mcmc(sgmat5[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR5 <- sgmat5[,c(3,6)]
+colnames(S.modelBV_RR5) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR5.mode <- P.modelBV_RR5.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR5))
+HPDinterval(mcmc(S.modelBV_RR5))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR5 <- matrix(NA, nrow(S.modelBV_RR5) ,2)
+
+for (i in 1:nrow(S.modelBV_RR5)) {
+  P3_5 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_5[k] <- P.modelBV_RR5[i, k] }  
+  P2_5 <- P3_5[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S5 <- P3_5[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR5[i,] <- solve(P2_5) %*% S5   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR5) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR5))
+HPDinterval(mcmc(beta_post_RR5))
+```
+
+#### Negative binomial model
+
+```{r}
+# Extract posterior samples
+bivar3.all.brm.nb_post <- posterior_samples(bivar3.all.brm.nb)
+bivar3.all.brm.nb_post <- as.mcmc(bivar3.all.brm.nb_post)
+#head(bivar3.all.brm.nb_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat6 <- sample.gmat1(bivar3.all.brm.nb_post, replicates = 1000) 
+
+sgmat6 <- lapply(sampled.gmat6, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat6 <- unname(sapply(sgmat6, '[[', 1)) #Change to matrix
+
+sgmat6 <- t(sgmat6)
+
+P.modelBV_RR6 <- sgmat6
+P.modelBV_RR6.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR6.mode[k] <- posterior.mode(mcmc(sgmat6[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR6 <- sgmat6[,c(3,6)]
+colnames(S.modelBV_RR6) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR6.mode <- P.modelBV_RR6.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR6))
+HPDinterval(mcmc(S.modelBV_RR6))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR6 <- matrix(NA, nrow(S.modelBV_RR6) ,2)
+
+for (i in 1:nrow(S.modelBV_RR6)) {
+  P3_6 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_6[k] <- P.modelBV_RR6[i, k] }  
+  P2_6 <- P3_6[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S6 <- P3_6[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR6[i,] <- solve(P2_6) %*% S6   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR6) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR6))
+HPDinterval(mcmc(beta_post_RR6))
+```
+
+## 4. mean_fitness_study, with shoot volume
+
+```{r message=FALSE, warning=FALSE}
+bf_fitness_study_shoot <- bf(round(mean_fitness_study) ~  
+                               cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+```
+
+### Poisson distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.pois<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,poisson), 
+                       data = datadef,warmup = 2000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+summary(bivar4.all.brm.pois) 
+```
+
+### Negative binomial distribution
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+summary(bivar4.all.brm.nb) 
+```
+
+### Model evaluation: Compare models
+
+```{r fig.height=8, fig.width=6}
+plot(bivar4.all.brm.pois) 
+plot(bivar4.all.brm.nb)
+```
+
+Rhat
+
+```{r}
+mcmc_rhat_hist(rhat(bivar4.all.brm.pois))+theme_bw()
+mcmc_rhat_hist(rhat(bivar4.all.brm.nb))+theme_bw()
+```
+
+Effective sample size: 
+  
+```{r}
+mcmc_neff_hist(neff_ratio(bivar4.all.brm.pois))+theme_bw()
+mcmc_neff_hist(neff_ratio(bivar4.all.brm.nb))+theme_bw()
+```
+
+Posterior predictive checks:  
+  
+```{r}
+y3_FFD<-subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$FFD 
+y4_fitness<-round(subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$mean_fitness_study)
+yrep5_fitness_pois<-posterior_predict(bivar4.all.brm.pois, 
+                                      draws = 500,resp="roundmeanfitnessstudy")
+yrep5_FFD_pois<-posterior_predict(bivar4.all.brm.pois, 
+                                  draws = 500,resp="FFD")
+yrep5_fitness_nb<-posterior_predict(bivar4.all.brm.nb, 
+                                    draws = 500,resp="roundmeanfitnessstudy")
+yrep5_FFD_nb<-posterior_predict(bivar4.all.brm.nb, 
+                                draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+```
+
+Each row of the matrix is a draw from the posterior predictive distribution, i.e. a vector with one element for each of the data points in y.
+
+Comparison of the distribution of y and the distributions of the simulated datasets in the yrep matrix
+
+```{r}
+ppc_dens_overlay(y4_fitness, yrep5_fitness_pois[1:500,])
+ppc_dens_overlay(y4_fitness, yrep5_fitness_pois[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y4_fitness, yrep5_fitness_nb[1:500,])
+ppc_dens_overlay(y4_fitness, yrep5_fitness_nb[1:500,])+xlim(0,10)
+ppc_dens_overlay(y3_FFD, yrep5_FFD_pois[1:500,])
+ppc_dens_overlay(y3_FFD, yrep5_FFD_nb[1:500,])
+```
+
+Poisson and negative binomial look pretty similar.
+
+Separate histograms of y and some of the yrep datasets
+
+```{r}
+ppc_hist(y4_fitness, yrep5_fitness_pois[1:8, ])
+ppc_hist(y4_fitness, yrep5_fitness_pois[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+ppc_hist(y4_fitness, yrep5_fitness_nb[1:8, ])
+ppc_hist(y4_fitness, yrep5_fitness_nb[1:8, ])+
+  coord_cartesian(xlim = c(-1, 20))
+```
+
+Here, negative binomial looks a bit better for fitness.
+
+```{r message=FALSE, warning=FALSE}
+ppc_stat(y4_fitness, yrep5_fitness_pois,stat="median")
+ppc_stat(y4_fitness, yrep5_fitness_nb,stat="median")
+ppc_stat(y4_fitness, yrep5_fitness_pois,stat="mean")
+ppc_stat(y4_fitness, yrep5_fitness_nb,stat="mean")
+ppc_stat(y4_fitness, yrep5_fitness_pois,stat="sd")
+ppc_stat(y4_fitness, yrep5_fitness_nb,stat="sd")
+ppc_stat(y4_fitness, yrep5_fitness_pois,stat="max")
+ppc_stat(y4_fitness, yrep5_fitness_nb,stat="max")
+```
+
+Look at the distribution of the proportion of zeros over the replicated datasets from the posterior predictive distribution in yrep and compare to the proportion of observed zeros in y.
+
+```{r}
+ppc_stat(y4_fitness, yrep5_fitness_pois, stat = "prop_zero", binwidth = 0.005)
+ppc_stat(y4_fitness, yrep5_fitness_nb, stat = "prop_zero", binwidth = 0.005)
+```
+
+They look quite similar.
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.pois)
+bayes_R2(bivar4.all.brm.nb)
+```
+
+Very similar.
+
+Leave-one-out cross validation (LOO) (not run): 
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- loo5_pois <- loo(bivar4.all.brm.pois, save_psis = TRUE, moment_match = TRUE) -->
+<!-- loo5_nb <- loo(bivar4.all.brm.nb, save_psis = TRUE, moment_match = TRUE) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- plot(loo5_pois) -->
+<!-- plot(loo5_nb) -->
+<!-- ``` -->
+
+<!-- LOO predictive checks -->
+
+<!-- ```{r} -->
+<!-- ppc_loo_pit_overlay(y3_fitness, yrep5_fitness_pois,  -->
+<!--                     lw = weights(loo5_pois$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep5_fitness_pois,  -->
+<!--                lw = weights(loo5_pois$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep5_fitness_pois,  -->
+<!--                lw = weights(loo5_pois$psis_object),compare="normal") -->
+<!-- ppc_loo_pit_overlay(y3_fitness, yrep5_fitness_nb,  -->
+<!--                     lw = weights(loo5_nb$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep5_fitness_nb,  -->
+<!--                lw = weights(loo5_nb$psis_object)) -->
+<!-- ppc_loo_pit_qq(y3_fitness, yrep5_fitness_nb,  -->
+<!--                lw = weights(loo5_nb$psis_object),compare="normal") -->
+<!-- ``` -->
+
+### Extract selection coefficients
+
+#### Poisson model
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.pois_post <- posterior_samples(bivar4.all.brm.pois)
+bivar4.all.brm.pois_post <- as.mcmc(bivar4.all.brm.pois_post)
+#head(bivar4.all.brm.pois_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat7 <- sample.gmat2(bivar4.all.brm.pois_post, replicates = 1000) 
+
+sgmat7 <- lapply(sampled.gmat7, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat7 <- unname(sapply(sgmat7, '[[', 1)) #Change to matrix
+
+sgmat7 <- t(sgmat7)
+
+P.modelBV_RR7 <- sgmat7
+P.modelBV_RR7.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR7.mode[k] <- posterior.mode(mcmc(sgmat7[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR7 <- sgmat7[,c(3,6)]
+colnames(S.modelBV_RR7) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR7.mode <- P.modelBV_RR7.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR7))
+HPDinterval(mcmc(S.modelBV_RR7))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR7 <- matrix(NA, nrow(S.modelBV_RR7) ,2)
+
+for (i in 1:nrow(S.modelBV_RR7)) {
+  P3_7 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_7[k] <- P.modelBV_RR7[i, k] }  
+  P2_7 <- P3_7[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S7 <- P3_7[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR7[i,] <- solve(P2_7) %*% S7   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR7) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR7))
+HPDinterval(mcmc(beta_post_RR7))
+```
+
+#### Negative binomial model
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb_post <- posterior_samples(bivar4.all.brm.nb)
+bivar4.all.brm.nb_post <- as.mcmc(bivar4.all.brm.nb_post)
+#head(bivar4.all.brm.nb_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat8 <- sample.gmat2(bivar4.all.brm.nb_post, replicates = 1000) 
+
+sgmat8 <- lapply(sampled.gmat8, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat8 <- unname(sapply(sgmat8, '[[', 1)) #Change to matrix
+
+sgmat8 <- t(sgmat8)
+
+P.modelBV_RR8 <- sgmat8
+P.modelBV_RR8.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR8.mode[k] <- posterior.mode(mcmc(sgmat8[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR8 <- sgmat8[,c(3,6)]
+colnames(S.modelBV_RR8) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR8.mode <- P.modelBV_RR8.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR8))
+HPDinterval(mcmc(S.modelBV_RR8))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR8 <- matrix(NA, nrow(S.modelBV_RR8) ,2)
+
+for (i in 1:nrow(S.modelBV_RR8)) {
+  P3_8 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_8[k] <- P.modelBV_RR8[i, k] }  
+  P2_8 <- P3_8[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S8 <- P3_8[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR8[i,] <- solve(P2_8) %*% S8   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR8) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR8))
+HPDinterval(mcmc(beta_post_RR8))
+```
+
+# Variation in selection among years with BLUPs
+
+Add BLUPs to data set
+
+```{r}
+datadef<-datadef%>%left_join(BLUPs_MCMC.all.brms%>%
+                               select(intercept,slope)%>%
+                               rownames_to_column(var="id"))
+```
+
+## Temp*slope
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_1<-brm(formula=round(intactseed)~slope*cmean_4+(1|id),
+                  family="poisson",data=datadef,
+                  warmup = 1000,iter = 4000,thin=2,chains=4,
+                  inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+conditional_effects(modelBLUP_1)
+```
+
+## Temp*slope+volume
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_2<-brm(formula=round(intactseed)~slope*cmean_4+
+                   cn_shoot_vol_mean_sqrt +(1|id),
+                  family="poisson",data=datadef,
+                  warmup = 1000,iter = 4000,thin=2,chains=4,
+                  inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+conditional_effects(modelBLUP_2)
+```
+
+## Volume*slope
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_3<-brm(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+(1|id),
+                  family="poisson",data=datadef,
+                  warmup = 1000,iter = 4000,thin=2,chains=4,
+                  inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+conditional_effects(modelBLUP_3)
+```
+
+## Temp*slope+volume*slope
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_4<-brm(formula=round(intactseed)~slope*cmean_4+
+                   slope*cn_shoot_vol_mean_sqrt+(1|id),
+                  family="poisson",data=datadef,
+                  warmup = 1000,iter = 4000,thin=2,chains=4,
+                  inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+conditional_effects(modelBLUP_4)
+```
+
+# Save large objects as .RData file
+
+```{r eval=FALSE, include=FALSE}
+save(univar.FFD_yearonly.all.brm,univar.FFD.all.brm,univar.FFD_RR.all.brm,loo1,
+     bivar1.all.brm.pois,bivar1.all.brm.nb,loo2_pois,loo2_nb,kfold1_pois,
+     kfold1_nb,bivar1.all.brm.pois_priors,bivar2.all.brm.pois,bivar2.all.brm.nb,
+     bivar3.all.brm.pois,bivar3.all.brm.nb,bivar4.all.brm.pois,
+     bivar4.all.brm.nb,modelBLUP_1,modelBLUP_2,modelBLUP_3,modelBLUP_4,
+     file = "output/large_objects.RData")
+```
+
+```{r include=FALSE}
+sessionInfo()
+```
