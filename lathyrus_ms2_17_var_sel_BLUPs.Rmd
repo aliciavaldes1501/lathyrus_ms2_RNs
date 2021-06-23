@@ -1,0 +1,366 @@
+---
+title: "Lathyrus ms2: selection on reaction norms for flowering time"
+subtitle: "Variation in selection among years using BLUPs - glmmTMB models"
+author : "Alicia Valdés"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(beepr)
+library(ggthemes)
+library(ggeffects)
+library(glmmTMB)
+library(knitr)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r load models, include=FALSE}
+# Load previously run models
+load("output/large_objects_BLUPs.RData")
+```
+
+# Read data and check ns
+
+```{r}
+datadef_BLUPs<-read.csv("data/datadef_BLUPs.csv") 
+head(datadef_BLUPs)
+```
+
+```{r}
+ggplot(datadef_BLUPs,aes(x=intactseed))+geom_histogram()
+```
+
+# Models with glmmTMB
+
+## Temp*slope
+
+Does selection on plasticity depend on temperature?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r}
+# Models without zero-inflation
+modelBLUP_1_1<-glmmTMB(round(intactseed)~slope*cmean_4+(1|id),family="poisson",
+                data=datadef_BLUPs)
+modelBLUP_1_2<-glmmTMB(round(intactseed)~slope*cmean_4+(1|id),family="nbinom2",
+                data=datadef_BLUPs)
+# Models with zero-inflation
+modelBLUP_1_3<-glmmTMB(formula=round(intactseed)~slope*cmean_4+(1|id),
+                ziformula=~.,family="poisson",data=datadef_BLUPs)
+modelBLUP_1_4<-glmmTMB(formula=round(intactseed)~slope*cmean_4+(1|id),
+                ziformula=~.,family="nbinom2",data=datadef_BLUPs)
+```
+
+```{r}
+AIC(modelBLUP_1_1,modelBLUP_1_2,modelBLUP_1_3,modelBLUP_1_4)
+anova(modelBLUP_1_1,modelBLUP_1_2,modelBLUP_1_3,modelBLUP_1_4)
+```
+
+modelBLUP_1_4 with a zero-inflated negative binomial is the best model.
+
+```{r}
+summary(modelBLUP_1_4)
+```
+
+Predicted effects:
+
+```{r message=FALSE, warning=FALSE}
+plot(ggpredict(modelBLUP_1_4,terms=c("slope","cmean_4"),type="zero_inflated"))
+# Predicted values are conditioned on the fixed effects 
+# and the zero-inflation component
+plot(ggpredict(modelBLUP_1_4,terms=c("slope","cmean_4"),type="zi_prob"))
+# Predicted zero-inflation probability
+```
+
+Selection for plasticity (more negative slopes) increases with temperature, but this is only driven by the zero-inflated part of the model, i.e. the probability of fitness being zero decreases more with higher plasticity (more negative slopes) with warm temperatures.
+
+## Temp*slope+volume
+
+Does selection on plasticity depend on temperature when considering also plant size?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r}
+# Models without zero-inflation
+modelBLUP_2_1<-glmmTMB(round(intactseed)~slope*cmean_4+cn_shoot_vol_mean_sqrt+
+                         (1|id),family="poisson",data=datadef_BLUPs)
+modelBLUP_2_2<-glmmTMB(round(intactseed)~slope*cmean_4+cn_shoot_vol_mean_sqrt+
+                         (1|id),family="nbinom2",data=datadef_BLUPs)
+# Models with zero-inflation
+modelBLUP_2_3<-glmmTMB(formula=round(intactseed)~slope*cmean_4+
+                         cn_shoot_vol_mean_sqrt+(1|id),ziformula=~.,
+                       family="poisson",data=datadef_BLUPs)
+modelBLUP_2_4<-glmmTMB(formula=round(intactseed)~slope*cmean_4+
+                         cn_shoot_vol_mean_sqrt+(1|id),ziformula=~.,
+                       family="nbinom2",data=datadef_BLUPs)
+```
+
+```{r}
+AIC(modelBLUP_2_1,modelBLUP_2_2,modelBLUP_2_3,modelBLUP_2_4)
+anova(modelBLUP_2_1,modelBLUP_2_2,modelBLUP_2_3,modelBLUP_2_4)
+```
+
+modelBLUP_2_4 with a zero-inflated negative binomial is the best model.
+
+```{r}
+summary(modelBLUP_2_4)
+```
+
+Predicted effects:
+
+```{r}
+plot(ggpredict(modelBLUP_2_4,terms=c("slope","cmean_4"),type="zero_inflated"))
+# Predicted values are conditioned on the fixed effects 
+# and the zero-inflation component
+plot(ggpredict(modelBLUP_2_4,terms=c("slope","cmean_4"),type="zi_prob"))
+# Predicted zero-inflation probability
+```
+
+The interaction slope:temperature in the zero-inflation part of the model is not significant (p=0.053) when including volume.
+
+## Volume*slope
+
+Does selection on plasticity depend on plant size?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r}
+# Models without zero-inflation
+modelBLUP_3_1<-glmmTMB(round(intactseed)~slope*cn_shoot_vol_mean_sqrt+cmean_4+
+                         (1|id),family="poisson",data=datadef_BLUPs)
+modelBLUP_3_2<-glmmTMB(round(intactseed)~slope*cn_shoot_vol_mean_sqrt+cmean_4+
+                         (1|id),family="nbinom2",data=datadef_BLUPs)
+# Models with zero-inflation
+modelBLUP_3_3<-glmmTMB(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+
+                         cmean_4+(1|id),ziformula=~.,
+                       family="poisson",data=datadef_BLUPs)
+modelBLUP_3_4<-glmmTMB(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+
+                         cmean_4+(1|id),ziformula=~.,
+                       family="nbinom2",data=datadef_BLUPs)
+```
+
+```{r}
+AIC(modelBLUP_3_1,modelBLUP_3_2,modelBLUP_3_3,modelBLUP_3_4)
+anova(modelBLUP_3_1,modelBLUP_3_2,modelBLUP_3_3,modelBLUP_3_4)
+```
+
+modelBLUP_3_4 with a zero-inflated negative binomial is the best model.
+
+```{r}
+summary(modelBLUP_3_4)
+```
+
+Predicted effects:
+
+```{r}
+plot(ggpredict(modelBLUP_3_4,terms=c("slope","cn_shoot_vol_mean_sqrt"),
+               type="zero_inflated"))
+# Predicted values are conditioned on the fixed effects 
+# and the zero-inflation component
+plot(ggpredict(modelBLUP_3_4,terms=c("slope","cn_shoot_vol_mean_sqrt"),
+               type="zi_prob"))
+# Predicted zero-inflation probability
+```
+
+Selection for plasticity (more negative slopes) decreases with size, but this is only driven by the zero-inflated part of the model, i.e. the probability of fitness being zero decreases more with higher plasticity (more negative slopes) with lower sizes.
+
+## Temp*slope+volume*slope
+
+Does selection on plasticity depend on temperature AND on plant size?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r}
+# Models without zero-inflation
+modelBLUP_4_1<-glmmTMB(round(intactseed)~slope*cmean_4+
+                         slope*cn_shoot_vol_mean_sqrt+cmean_4+
+                         (1|id),family="poisson",data=datadef_BLUPs)
+modelBLUP_4_2<-glmmTMB(round(intactseed)~slope*cmean_4+
+                         slope*cn_shoot_vol_mean_sqrt+cmean_4+
+                         (1|id),family="nbinom2",data=datadef_BLUPs)
+# Models with zero-inflation
+modelBLUP_4_3<-glmmTMB(formula=round(intactseed)~slope*cmean_4+
+                         slope*cn_shoot_vol_mean_sqrt+
+                         cmean_4+(1|id),ziformula=~.,
+                       family="poisson",data=datadef_BLUPs)
+modelBLUP_4_4<-glmmTMB(formula=round(intactseed)~slope*cmean_4+
+                         slope*cn_shoot_vol_mean_sqrt+
+                         cmean_4+(1|id),ziformula=~.,
+                       family="nbinom2",data=datadef_BLUPs)
+```
+
+```{r}
+AIC(modelBLUP_4_1,modelBLUP_4_2,modelBLUP_4_3,modelBLUP_4_4)
+anova(modelBLUP_4_1,modelBLUP_4_2,modelBLUP_4_3,modelBLUP_4_4)
+```
+
+modelBLUP_4_4 with a zero-inflated negative binomial is the best model.
+
+```{r}
+summary(modelBLUP_4_4)
+```
+
+Predicted effects:
+
+```{r}
+plot(ggpredict(modelBLUP_4_4,terms=c("slope","cmean_4"),type="zero_inflated"))
+plot(ggpredict(modelBLUP_4_4,terms=c("slope","cn_shoot_vol_mean_sqrt"),
+               type="zero_inflated"))
+# Predicted values are conditioned on the fixed effects 
+# and the zero-inflation component
+plot(ggpredict(modelBLUP_4_4,terms=c("slope","cmean_4"),type="zi_prob"))
+plot(ggpredict(modelBLUP_4_4,terms=c("slope","cn_shoot_vol_mean_sqrt"),
+               type="zi_prob"))
+# Predicted zero-inflation probability
+```
+
+Similar results as in previous models: Selection for plasticity (more negative slopes) increases with temperature and decreases with size, but this is only driven by the zero-inflated part of the model, i.e. the probability of fitness being zero decreases more with higher plasticity (more negative slopes) with warm temperatures and lower sizes.
+
+<!-- # Models with brms -->
+
+<!-- ## Temp*slope -->
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- my.cores <- detectCores() -->
+<!-- modelBLUP_1<-brm(formula=round(intactseed)~slope*cmean_4+(1|id), -->
+<!--                   family="poisson",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 6000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_1nb<-brm(formula=round(intactseed)~slope*cmean_4+(1|id), -->
+<!--                   family="negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores, -->
+<!--                   control = list(adapt_delta = 0.99)) -->
+<!-- modelBLUP_1zinb<-brm(formula=round(intactseed)~slope*cmean_4+(1|id), -->
+<!--                   family="zero_inflated_negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 2000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores, -->
+<!--                   control = list(adapt_delta = 0.99)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- conditional_effects(modelBLUP_1) -->
+<!-- conditional_effects(modelBLUP_1nb) -->
+<!-- conditional_effects(modelBLUP_1zinb) -->
+<!-- ``` -->
+
+<!-- ## Temp*slope+volume -->
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- modelBLUP_2<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    cn_shoot_vol_mean_sqrt +(1|id), -->
+<!--                   family="poisson",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_2nb<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    cn_shoot_vol_mean_sqrt +(1|id), -->
+<!--                   family="negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_2zinb<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    cn_shoot_vol_mean_sqrt +(1|id), -->
+<!--                   family="zero_inflated_negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- conditional_effects(modelBLUP_2) -->
+<!-- conditional_effects(modelBLUP_2nb) -->
+<!-- conditional_effects(modelBLUP_2zinb) -->
+<!-- ``` -->
+
+<!-- ## Volume*slope -->
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- modelBLUP_3<-brm(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="poisson",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_3nb<-brm(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_3zinb<-brm(formula=round(intactseed)~slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="zero_inflated_negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- conditional_effects(modelBLUP_3) -->
+<!-- conditional_effects(modelBLUP_3nb) -->
+<!-- conditional_effects(modelBLUP_3zinb) -->
+<!-- ``` -->
+
+<!-- ## Temp*slope+volume*slope -->
+
+<!-- ```{r eval=FALSE, include=FALSE} -->
+<!-- modelBLUP_4<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="poisson",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_4nb<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- modelBLUP_4zinb<-brm(formula=round(intactseed)~slope*cmean_4+ -->
+<!--                    slope*cn_shoot_vol_mean_sqrt+(1|id), -->
+<!--                   family="zero_inflated_negbinomial",data=datadef_BLUPs, -->
+<!--                   warmup = 1000,iter = 4000,thin=2,chains=4, -->
+<!--                   inits = "random",seed = 12345,cores = my.cores) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- conditional_effects(modelBLUP_4) -->
+<!-- conditional_effects(modelBLUP_4nb) -->
+<!-- conditional_effects(modelBLUP_4zinb) -->
+<!-- ``` -->
+
+# Save large objects as .RData file
+
+```{r eval=FALSE, include=FALSE}
+save(modelBLUP_1_1,modelBLUP_1_2,modelBLUP_1_3,modelBLUP_1_4,
+     modelBLUP_2_1,modelBLUP_2_2,modelBLUP_2_3,modelBLUP_2_4,
+     modelBLUP_3_1,modelBLUP_3_2,modelBLUP_3_3,modelBLUP_3_4,
+     modelBLUP_4_1,modelBLUP_4_2,modelBLUP_4_3,modelBLUP_4_4,
+     modelBLUP_1,modelBLUP_2,modelBLUP_3,modelBLUP_4,
+     modelBLUP_1nb,modelBLUP_2nb,modelBLUP_3nb,modelBLUP_4nb,
+     #modelBLUP_1zinb,modelBLUP_2zinb,modelBLUP_3zinb,modelBLUP_4zinb,
+     file = "output/large_objects_BLUPs.RData")
+```
+
+```{r include=FALSE}
+sessionInfo()
+```

@@ -1,0 +1,416 @@
+---
+title: "Lathyrus ms2: selection on reaction norms for flowering time"
+subtitle: "Variation in selection among years using BLUPs - brms models"
+author : "Alicia Valdés"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(beepr)
+library(ggthemes)
+library(ggeffects)
+library(glmmTMB)
+library(knitr)
+library(parallel)
+library(brms)
+library(bayesplot)
+library(viridis)
+library(cowplot)
+```
+
+```{r Define ggplot themes and stuff, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r load models, include=FALSE}
+# Load previously run models
+load("output/large_objects_BLUPs_brms.RData")
+```
+
+# Read data and check ns
+
+```{r}
+datadef_BLUPs<-read.csv("data/datadef_BLUPs.csv") 
+head(datadef_BLUPs)
+```
+
+```{r}
+ggplot(datadef_BLUPs,aes(x=intactseed))+geom_histogram()
+```
+
+# Models with brms
+
+## Temp*slope
+
+Does selection on plasticity depend on temperature?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r}
+my.cores <- detectCores()
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models without zero-inflation
+modelBLUP_1_1_brms<-brm(formula=round(intactseed)~slope*cmean_4+(1|id),
+                        family="poisson",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+modelBLUP_1_2_brms<-brm(formula=round(intactseed)~slope*cmean_4+(1|id),
+                        family="negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+# Model with zero-inflation
+modelBLUP_1_3_brms<-brm(bf(round(intactseed)~slope*cmean_4+(1|id),
+                        zi~slope*cmean_4+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+```
+
+### Posterior predictive checks
+
+```{r}
+y1<-round(subset(datadef_BLUPs,
+           !is.na(intactseed))$intactseed) # vector of outcome values
+yrep1_1<-posterior_predict(modelBLUP_1_1_brms, draws = 500)
+yrep1_2<-posterior_predict(modelBLUP_1_2_brms, draws = 500)
+yrep1_3<-posterior_predict(modelBLUP_1_3_brms, draws = 500)
+# matrices of draws from the posterior predictive distribution
+```
+
+```{r}
+ppc_dens_overlay(y1, yrep1_1[1:500,])
+ppc_dens_overlay(y1, yrep1_2[1:500,])
+ppc_dens_overlay(y1, yrep1_3[1:500,])
+ppc_dens_overlay(y1, yrep1_1[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y1, yrep1_2[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y1, yrep1_3[1:500,])+xlim(0, 10)
+```
+
+Zero-inflated negative binomial looks much better.
+
+### Model summary and predictions
+
+```{r}
+summary(modelBLUP_1_3_brms)
+```
+
+Predicted effects:
+
+```{r}
+modelBLUP_1_3_brms_plot1<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_1_3_brms, 
+                         effects = "slope:cmean_4",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+legend1 <- get_legend(modelBLUP_1_3_brms_plot1)
+modelBLUP_1_3_brms_plot1<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_1_3_brms, 
+                         effects = "slope:cmean_4",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+modelBLUP_1_3_brms_plot2<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_1_3_brms, 
+                         effects = "slope:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted zero-inflation probability of fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+```{r fig.height=7, fig.width=17}
+ggdraw(plot_grid(plot_grid(modelBLUP_1_3_brms_plot1, modelBLUP_1_3_brms_plot2,
+                           ncol=2, align='h',labels=c("A)","B)"),
+                           label_fontfamily="serif"),
+                 plot_grid(legend1,NULL,ncol=1),rel_widths=c(1, 0.2)))
+ggsave(filename="output/figures/fig3.tiff",device="tiff",
+       width=34,height=14,units="cm",dpi=300,compression="lzw")
+```
+
+Selection for plasticity (more negative slopes) increases with temperature, but this is only driven by the zero-inflated part of the model, i.e. the probability of fitness being zero decreases more with higher plasticity (more negative slopes) with warm temperatures.
+
+## Temp*slope+volume
+
+Does selection on plasticity depend on temperature when considering also plant size?
+
+Trying different distributions and models with and without zero-inflation
+
+```{r eval=FALSE, include=FALSE}
+# Models without zero-inflation
+modelBLUP_2_1_brms<-brm(formula=round(intactseed)~slope*cmean_4+
+                          cn_shoot_vol_mean_sqrt+(1|id),
+                        family="poisson",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+modelBLUP_2_2_brms<-brm(formula=round(intactseed)~slope*cmean_4+
+                          cn_shoot_vol_mean_sqrt+(1|id),
+                        family="negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+# Models with zero-inflation
+modelBLUP_2_3_brms<-brm(bf(round(intactseed)~slope*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                        zi~slope*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+# Model with measurement error
+modelBLUP_2_4_brms<-brm(bf(round(intactseed)~me(slope,slope_sd)*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                        zi~me(slope,slope_sd)*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id))+set_mecor(FALSE),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 5000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99,max_treedepth = 15))
+# By default, latent noise-free variables are assumed to be correlated. 
+# To change that, add set_mecor(FALSE) to your model formula object 
+
+# slope_sd is the standard deviation (measure of variability) 
+# (not standard error!) of the slope BLUP
+# slope is the mean (measure of central tendency) of the slope BLUP
+# The mean and sd are calculated from all the posterior draws 
+# (6000 in our case) using posterior_summary
+
+# 3: There were 78 divergent transitions after warmup. See
+# http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+# to find out why this is a problem and how to eliminate them. 
+# 4: There were 1997 transitions after warmup that exceeded the maximum treedepth. Increase max_treedepth above 15. See
+# http://mc-stan.org/misc/warnings.html#maximum-treedepth-exceeded 
+# 5: Examine the pairs() plot to diagnose sampling problems
+#  
+# 6: The largest R-hat is 2.26, indicating chains have not mixed.
+# Running the chains for more iterations may help. See
+# http://mc-stan.org/misc/warnings.html#r-hat 
+# 7: Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
+# Running the chains for more iterations may help. See
+# http://mc-stan.org/misc/warnings.html#bulk-ess 
+# 8: Tail Effective Samples Size (ESS) is too low, indicating posterior variances and tail quantiles may be unreliable.
+# Running the chains for more iterations may help. See
+# http://mc-stan.org/misc/warnings.html#tail-ess 
+```
+
+### Posterior predictive checks
+
+```{r}
+y1<-round(subset(datadef_BLUPs,
+           !is.na(intactseed)&!(is.na(cn_shoot_vol_mean_sqrt)))$intactseed) 
+yrep2_1<-posterior_predict(modelBLUP_2_1_brms, draws = 500)
+yrep2_2<-posterior_predict(modelBLUP_2_2_brms, draws = 500)
+yrep2_3<-posterior_predict(modelBLUP_2_3_brms, draws = 500)
+```
+
+```{r}
+ppc_dens_overlay(y1, yrep2_1[1:500,])
+ppc_dens_overlay(y1, yrep2_2[1:500,])
+ppc_dens_overlay(y1, yrep2_3[1:500,])
+ppc_dens_overlay(y1, yrep2_1[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y1, yrep2_2[1:500,])+xlim(0, 10)
+ppc_dens_overlay(y1, yrep2_3[1:500,])+xlim(0, 10)
+```
+
+### Model summary and predictions
+
+```{r}
+print(modelBLUP_2_3_brms,digits=3)
+```
+
+Predicted effects:
+
+```{r}
+modelBLUP_2_3_brms_plot1<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_2_3_brms, 
+                         effects = "slope:cmean_4",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted count of fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+legend1 <- get_legend(modelBLUP_2_3_brms_plot1)
+modelBLUP_2_3_brms_plot1<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_2_3_brms, 
+                         effects = "slope:cmean_4",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted count of fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+modelBLUP_2_3_brms_plot2<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_2_3_brms, 
+                         effects = "slope:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`),
+       aes(x=slope,y=estimate__, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower__,ymax=upper__,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted zero-inflation probability of fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+```{r fig.height=7, fig.width=17}
+ggdraw(plot_grid(plot_grid(modelBLUP_2_3_brms_plot1, modelBLUP_2_3_brms_plot2,
+                           ncol=2, align='h',labels=c("A)","B)"),
+                           label_fontfamily="serif"),
+                 plot_grid(legend1,NULL,ncol=1),rel_widths=c(1, 0.2)))
+```
+
+Selection for plasticity (more negative slopes) increases with temperature, but this is only driven by the zero-inflated part of the model, i.e. the probability of fitness being zero decreases more with higher plasticity (more negative slopes) with warm temperatures. CAREFUL: CIs 0.002    0.262 (try with more iterations?)
+
+```{r}
+modelBLUP_2_3_brms_plot2<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_2_3_brms, 
+                         effects = "slope:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=slope,y=prob_fitness, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower,ymax=upper,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+ggdraw(plot_grid(modelBLUP_2_3_brms_plot2,
+                 plot_grid(legend1,NULL,ncol=1),rel_widths=c(1, 0.4)))
+ggsave(filename="output/figures/fig3_size.tiff",device="tiff",
+       width=18,height=12,units="cm",dpi=300,compression="lzw")
+```
+
+
+## Year*slope+volume (not used)
+
+Does selection on plasticity vary among years when considering also plant size?
+
+```{r}
+datadef_BLUPs$year_fct<-as.factor(datadef_BLUPs$year)
+```
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_3_3_brms<-brm(bf(round(intactseed)~slope*year_fct+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                        zi~slope*year_fct+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 8000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+# Would need more iterations
+```
+
+## Temp*intercept+volume
+
+```{r eval=FALSE, include=FALSE}
+modelBLUP_4_3_brms<-brm(bf(round(intactseed)~intercept*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                        zi~intercept*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+```
+
+### Model summary
+
+```{r}
+print(modelBLUP_4_3_brms,digits=3)
+```
+
+# Save large objects as .RData file
+
+```{r eval=FALSE, include=FALSE}
+save(modelBLUP_1_1_brms,modelBLUP_1_2_brms,modelBLUP_1_3_brms,
+     modelBLUP_2_1_brms,modelBLUP_2_2_brms,modelBLUP_2_3_brms,
+     modelBLUP_2_4_brms,
+     modelBLUP_3_3_brms,modelBLUP_4_3_brms,
+     file = "output/large_objects_BLUPs_brms.RData")
+save(modelBLUP_2_4_brms,file = "output/model_measurement_error.RData")
+```
+
+```{r include=FALSE}
+sessionInfo()
+```
