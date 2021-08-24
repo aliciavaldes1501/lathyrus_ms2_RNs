@@ -34,6 +34,8 @@ library(parallel)
 library(future)
 library(ggeffects)
 library(arm)
+library(cowplot)
+library(broom)
 ```
 
 ```{r Define ggplot themes, include=FALSE}
@@ -412,12 +414,16 @@ plot_grid(ggplot()+
             ylab("Predicted FFD"),
           plot_grid(ggplot(BLUPs_MCMC.all.brms,
                            aes(x=intercept+fixef(univar.FFD_RR.all.brm)[1]))+
-                      geom_histogram(fill="grey",color="black")+my_theme()+
+                      geom_histogram(fill="lightgrey",color="black")+my_theme()+
+                      geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[1],
+                                 size=0.5,linetype="dashed")+
                       xlab("Elevation of the reaction norm")+
                       ylab("Number of\nindividuals"),
                     ggplot(BLUPs_MCMC.all.brms,
                            aes(x=slope+fixef(univar.FFD_RR.all.brm)[2]))+
-                      geom_histogram(fill="grey",color="black")+my_theme()+
+                      geom_histogram(fill="lightgrey",color="black")+my_theme()+
+                      geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[2],
+                                 size=0.5,linetype="dashed")+
                       xlab("Slope of the reaction norm")+
                       ylab("Number of\nindividuals"),
                     ncol=1,labels=c("B)","C)"),label_fontfamily="serif"),
@@ -2063,6 +2069,306 @@ ggplot(selcoefs,
 # hollow circles: no condition, filled circles: condition
 ggsave(filename="output/figures/fig2.tiff",
         device="tiff",width=16,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+# Appendix S1
+
+## Model in Table S1C
+
+```{r}
+color_scheme_set("viridis")
+arrayS1C<-as.array(univar.FFD_RR.all.brm)
+dimnames(arrayS1C)[[3]][1:7] <- c("Intercept","April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (slope)",
+                                 "Year: SD (intercept)",
+                                 "Individual:\ncorrelation (intercept, slope)",
+                                 "Sigma")
+
+mcmc_trace(arrayS1C,pars=c("Intercept","April temperature",
+                                 "Individual: SD (intercept)"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_1a.tiff",
+        device="tiff",width=20,height=21,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS1C,pars=c("Individual: SD (slope)",
+                                 "Year: SD (intercept)",
+                                 "Individual:\ncorrelation (intercept, slope)",
+                                 "Sigma"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_1b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(univar.FFD_RR.all.brm))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(univar.FFD_RR.all.brm))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_2.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+ppc_dens_overlay(y1, yrep3[1:100,])+my_theme_legend()+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS1_3.tiff",
+       device="tiff",width=12,height=8,units="cm",dpi=300,compression="lzw")
+```
+
+## Model in Table 1
+
+```{r}
+array1<-as.array(bivar2.all.brm.nb)
+dimnames(array1)[[3]][1:12] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Vegetative size on fitness","Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+
+mcmc_trace(array1,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Vegetative size on fitness"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_4a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(array1,pars=c("Individual: SD\n(intercept of FFD)",
+                         "Individual: SD\n(slope of FFD)",
+                         "Individual: SD\n(intercept of fitness)",
+                         "Year: SD\n(intercept of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_4b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(array1,pars=c(
+  "Individual: correlation\n(intercept of FFD,slope of FFD)",
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_4c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(bivar2.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar2.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_5.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+plot_grid(ppc_dens_overlay(y3_fitness, yrep3_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y3_FFD, yrep3_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_6.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Model in Table S2
+
+```{r}
+arrayS2<-as.array(bivar1.all.brm.nb)
+dimnames(arrayS2)[[3]][1:11] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+mcmc_trace(arrayS2,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Individual: SD\n(intercept of FFD)"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_7a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS2,pars=c(
+  "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+  "Year: SD\n(intercept of FFD)",
+  "Individual: correlation\n(intercept of FFD,slope of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_7b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS2,pars=c(
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_7c.tiff",
+        device="tiff",width=20,height=21,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(bivar1.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar1.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_8.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+plot_grid(ppc_dens_overlay(y2_fitness, yrep2_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y2_FFD, yrep2_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_9.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Model in Table S3A
+
+```{r}
+arrayS3A<-as.array(bivar3.all.brm.nb)
+dimnames(arrayS3A)[[3]][1:11] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+mcmc_trace(arrayS3A,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Individual: SD\n(intercept of FFD)"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_10a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3A,pars=c(
+  "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+  "Year: SD\n(intercept of FFD)",
+  "Individual: correlation\n(intercept of FFD,slope of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_10b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3A,pars=c(
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_10c.tiff",
+        device="tiff",width=20,height=21,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(bivar3.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar3.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_11.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+plot_grid(ppc_dens_overlay(y3_fitness, yrep4_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y2_FFD, yrep4_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_12.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Model in Table S3B
+
+```{r}
+arrayS3B<-as.array(bivar4.all.brm.nb)
+dimnames(arrayS3B)[[3]][1:12] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Vegetative size on fitness",
+    "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+mcmc_trace(arrayS3B,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Vegetative size on fitness"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_13a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3B,pars=c(
+   "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_13b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3B,pars=c(
+  "Individual: correlation\n(intercept of FFD,slope of FFD)",
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_13c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(bivar4.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar4.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_14.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+plot_grid(ppc_dens_overlay(y4_fitness, yrep5_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y3_FFD, yrep5_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_15.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+# Fig. S2
+
+```{r}
+datadef%>%
+  group_by(year)%>%
+  summarise(sd_FFD=sd(FFD,na.rm=T),mean_4=mean(mean_4))%>%
+  ggplot(aes(x=mean_4,y=sd_FFD))+geom_point(size=3,alpha=0.2)+
+  geom_smooth(method="lm",color="black")+my_theme()+
+  xlab("April temperature (ºC)")+ylab("SD of FFD")
+datadef%>%
+  group_by(year)%>%
+  summarise(sd_FFD=sd(FFD,na.rm=T),mean_4=mean(mean_4))%>%
+  do(tidy(lm(sd_FFD~mean_4,data=.)))
+ggsave(filename="output/figures/figS2.tiff",device="tiff",
+       width=10,height=9,units="cm",dpi=300,compression="lzw")
 ```
 
 

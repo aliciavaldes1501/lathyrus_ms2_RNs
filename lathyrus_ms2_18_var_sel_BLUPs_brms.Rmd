@@ -394,10 +394,299 @@ modelBLUP_4_3_brms<-brm(bf(round(intactseed)~intercept*cmean_4+
                         control = list(adapt_delta = 0.99))
 ```
 
-### Model summary
+### Model summary and predictions
 
 ```{r}
 print(modelBLUP_4_3_brms,digits=3)
+```
+
+Predicted effects:
+
+```{r}
+modelBLUP_4_3_brms_plot1<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_4_3_brms, 
+                         effects = "intercept",dpar="zi")$`intercept`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=intercept,y=prob_fitness))+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.2)+
+  geom_line(size=1)+
+  my_theme()+
+  xlab("Intercept of the reaction norm")+
+  ylab("Predicted probability of having any fitness")
+modelBLUP_4_3_brms_plot2<-
+  ggplot(as.data.frame(conditional_effects(modelBLUP_4_3_brms, 
+                         effects = "cmean_4",dpar="zi")$`cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=cmean_4,y=prob_fitness))+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.2)+
+  geom_line(size=1)+
+  my_theme()+
+  xlab("April temperature (mean-centered)")+
+  ylab("Predicted probability of having any fitness")
+```
+
+```{r fig.height=5, fig.width=12}
+ggdraw(plot_grid(modelBLUP_4_3_brms_plot1, modelBLUP_4_3_brms_plot2,
+                           ncol=2, align='h',labels=c("A)","B)"),
+                           label_fontfamily="serif"))
+ggsave(filename="output/figures/figS1.tiff",device="tiff",
+       width=28,height=13,units="cm",dpi=300,compression="lzw")
+```
+
+## Temp*slope+intercept+volume
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_5_3_brms<-brm(bf(round(intactseed)~slope*cmean_4+intercept+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope*cmean_4+intercept+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+summary(modelBLUP_5_3_brms)
+```
+
+```{r}
+ggplot(as.data.frame(conditional_effects(modelBLUP_5_3_brms, 
+                         effects = "slope:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=slope,y=prob_fitness, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower,ymax=upper,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+## Temp*slope+Temp*intercept+volume
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_6_3_brms<-brm(bf(round(intactseed)~slope*cmean_4+intercept*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope*cmean_4+intercept*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+summary(modelBLUP_6_3_brms)
+```
+
+```{r}
+ggplot(as.data.frame(conditional_effects(modelBLUP_6_3_brms, 
+                         effects = "slope:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`slope:cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=slope,y=prob_fitness, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower,ymax=upper,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+```{r}
+ggplot(as.data.frame(conditional_effects(modelBLUP_6_3_brms, 
+                         effects = "intercept:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`intercept:cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=intercept,y=prob_fitness, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower,ymax=upper,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("Intercept of the reaction norm")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+## Temp*pc1+volume
+
+PCA of slope and intercept
+
+```{r}
+PCA1<-prcomp(~datadef_BLUPs$slope+datadef_BLUPs$intercept,center=T,scale=T)
+summary(PCA1)
+plot(PCA1)
+biplot(PCA1)
+
+PCA1_scores<-as.data.frame(predict(PCA1))
+datadef_BLUPs$PC1<-PCA1_scores$PC1
+datadef_BLUPs$PC2<-PCA1_scores$PC2
+hist(datadef_BLUPs$PC1)
+hist(datadef_BLUPs$PC2)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_7_3_brms<-brm(bf(round(intactseed)~PC1*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~PC1*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(modelBLUP_7_3_brms)
+```
+
+```{r}
+ggplot(as.data.frame(conditional_effects(modelBLUP_7_3_brms, 
+                         effects = "PC1:cmean_4",dpar="zi",
+                         int_conditions=
+                           list(cmean_4=quantile))$`PC1:cmean_4`)%>%
+           mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__),
+       aes(x=PC1,y=prob_fitness, group=cmean_4))+
+  geom_ribbon(aes(ymin=lower,ymax=upper,
+                  fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(size=1,aes(color=as.factor(round(cmean_4,2))))+
+  my_theme_legend()+
+  xlab("PC1 of the reaction norm")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
+  labs(fill="April temperature\n(mean-centered)",
+       colour="April temperature\n(mean-centered)")
+```
+
+# Appendix S1
+
+## Model in Table S5
+
+```{r}
+color_scheme_set("viridis")
+arrayS5<-as.array(modelBLUP_2_3_brms)
+dimnames(arrayS5)[[3]][1:13] <- c("Intercept","zi_Intercept","BLUP slope",
+                                 "April temperature","Vegetative size",
+                                 "BLUP slope : April temperature",
+                                 "zi_BLUP slope","zi_April temperature",
+                                 "zi_Vegetative size",
+                                 "zi_BLUP slope : April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (zi_intercept)","Shape")
+mcmc_trace(arrayS5,pars=c("Intercept","zi_Intercept","BLUP slope",
+                          "April temperature"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_16a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("Vegetative size","BLUP slope : April temperature",
+                          "zi_BLUP slope","zi_April temperature"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_16b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("zi_Vegetative size",
+                          "zi_BLUP slope : April temperature",
+                          "Individual: SD (intercept)",
+                          "Individual: SD (zi_intercept)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_16c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("Shape"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_16d.tiff",
+        device="tiff",width=20,height=7,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(modelBLUP_2_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(modelBLUP_2_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_17.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+ppc_dens_overlay(y1, yrep2_3[1:100,])+my_theme_legend()+xlim(0, 10)+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS1_18.tiff",
+       device="tiff",width=24,height=14,units="cm",dpi=300,compression="lzw")
+```
+
+## Model in Table S6
+
+```{r}
+arrayS6<-as.array(modelBLUP_4_3_brms)
+dimnames(arrayS6)[[3]][1:13] <- c("Intercept","zi_Intercept","BLUP intercept",
+                                 "April temperature","Vegetative size",
+                                 "BLUP intercept : April temperature",
+                                 "zi_BLUP intercept","zi_April temperature",
+                                 "zi_Vegetative size",
+                                 "zi_BLUP intercept : April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (zi_intercept)","Shape")
+mcmc_trace(arrayS6,pars=c("Intercept","zi_Intercept","BLUP intercept",
+                          "April temperature"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_19a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("Vegetative size","BLUP intercept : April temperature",
+                          "zi_BLUP intercept","zi_April temperature"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_19b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("zi_Vegetative size",
+                          "zi_BLUP intercept : April temperature",
+                          "Individual: SD (intercept)",
+                          "Individual: SD (zi_intercept)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_19c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("Shape"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS1_19d.tiff",
+        device="tiff",width=20,height=7,units="cm",dpi=300,compression="lzw")
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(rhat(modelBLUP_4_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(modelBLUP_4_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS1_20.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+```{r}
+yrep4_3<-posterior_predict(modelBLUP_4_3_brms, draws = 500)
+ppc_dens_overlay(y1, yrep4_3[1:100,])+my_theme_legend()+xlim(0, 10)+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS1_21.tiff",
+       device="tiff",width=24,height=14,units="cm",dpi=300,compression="lzw")
 ```
 
 # Save large objects as .RData file
@@ -405,10 +694,12 @@ print(modelBLUP_4_3_brms,digits=3)
 ```{r eval=FALSE, include=FALSE}
 save(modelBLUP_1_1_brms,modelBLUP_1_2_brms,modelBLUP_1_3_brms,
      modelBLUP_2_1_brms,modelBLUP_2_2_brms,modelBLUP_2_3_brms,
-     modelBLUP_2_4_brms,
      modelBLUP_3_3_brms,modelBLUP_4_3_brms,
+     modelBLUP_5_3_brms,
+     modelBLUP_6_3_brms,
+     modelBLUP_7_3_brms,
      file = "output/large_objects_BLUPs_brms.RData")
-save(modelBLUP_2_4_brms,file = "output/model_measurement_error.RData")
+save(modelBLUP_2_3_brms,file = "output/model_without_measurement_error.RData")
 ```
 
 ```{r include=FALSE}
