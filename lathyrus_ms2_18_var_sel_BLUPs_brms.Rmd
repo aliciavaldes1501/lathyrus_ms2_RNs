@@ -657,7 +657,8 @@ ggsave(filename="output/figures/fig3.tiff",device="tiff",
 
 ```{r}
 datadef_BLUPs$fitness_01<-with(datadef_BLUPs,
-                               ifelse(intactseed==0,0,ifelse(intactseed>0,1,NA)))
+                               ifelse(intactseed==0,0,
+                                      ifelse(intactseed>0,1,NA)))
 
 quantile(datadef_BLUPs$cmean_4)
 
@@ -676,9 +677,20 @@ datadef_BLUPs<-datadef_BLUPs%>%
          ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
                 ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
                        ifelse(cmean_4>0.9534589,4,NA))))))
+
+label_names1 <- list(
+  '1'="First quarter\nMean April temperature\n(mean-centered) = -1.45",
+  '2'="Second quarter\nMean April temperature\n(mean-centered) = -0.55",
+  '3'="Third quarter\nMean April temperature\n(mean-centered) = 0.11",
+  '4'="Fourth quarter\nMean April temperature\n(mean-centered) = 1.87"
+)
+
+labeller_function1 <- function(variable,value){
+  return(label_names1[value])
+}
 ```
 
-```{r}
+```{r fig.height=5, fig.width=9}
 # copy from maladaptive responses code revision - continue copying from there!
 ggplot()+
   geom_ribbon(data=as.data.frame(
@@ -716,9 +728,9 @@ ggplot()+
                color=as.factor(round(cmean_4,2))))+
   geom_jitter(data=datadef_BLUPs,aes(x=slope_residuals,y=fitness_01),
               size=3,alpha=0.05,width=0,height=0.03)+
-  facet_grid(~cmean_4_cat)+
-  my_theme_legend()+
-  xlab("Slope of the reaction norm\n(residuals of slope on intercept)")+
+  facet_grid(~cmean_4_cat,labeller=labeller(cmean_4_cat=labeller_function1))+
+  my_theme()+
+  xlab("Slope of the reaction norm (residuals of slope on intercept)")+
   ylab("Predicted probability of having any fitness")+
   scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
                      guide = guide_legend(title.position = "top",
@@ -727,9 +739,9 @@ ggplot()+
                     guide = guide_legend(title.position = "top",
                                          nrow=1))+
   labs(fill="April temperature (mean-centered)",
-       colour="April temperature (mean-centered)")+
-  #theme(legend.position=c(0.42,0.9),legend.box="horizontal")
-  theme(legend.position="top",legend.box="horizontal",legend.title.align=0.5)
+       colour="April temperature (mean-centered)")
+ggsave(filename="output/figures/fig3_extended.tiff",device="tiff",
+       width=30,height=15,units="cm",dpi=300,compression="lzw")
 ```
 
 
