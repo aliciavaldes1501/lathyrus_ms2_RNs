@@ -639,12 +639,97 @@ ggplot(as.data.frame(conditional_effects(modelBLUP_8_3_brms,
   my_theme_legend()+
   xlab("Slope of the reaction norm\n(residuals of slope on intercept)")+
   ylab("Predicted probability of having any fitness")+
-  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
-  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1))+
-  labs(fill="April temperature\n(mean-centred)",
-       colour="April temperature\n(mean-centred)")
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+                     guide = guide_legend(title.position = "top",
+                                          nrow=1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+                    guide = guide_legend(title.position = "top",
+                                         nrow=1))+
+  labs(fill="April temperature (mean-centered)",
+       colour="April temperature (mean-centered)")+
+  #theme(legend.position=c(0.42,0.9),legend.box="horizontal")
+  theme(legend.position="top",legend.box="horizontal",legend.title.align=0.5)
 ggsave(filename="output/figures/fig3.tiff",device="tiff",
-       width=18,height=12,units="cm",dpi=300,compression="lzw")
+       width=12,height=14,units="cm",dpi=300,compression="lzw")
+```
+
+### Figure 3 (facets & data points)
+
+```{r}
+datadef_BLUPs$fitness_01<-with(datadef_BLUPs,
+                               ifelse(intactseed==0,0,ifelse(intactseed>0,1,NA)))
+
+quantile(datadef_BLUPs$cmean_4)
+
+mean(subset(datadef_BLUPs,cmean_4<=-0.8998744)$cmean_4) 
+# Mean cat 1 = -1.451023
+mean(subset(datadef_BLUPs,cmean_4>-0.8998744&cmean_4<=-0.2282078)$cmean_4) 
+# Mean cat 2 = -0.5470505
+mean(subset(datadef_BLUPs,cmean_4>-0.2282078&cmean_4<=0.9534589)$cmean_4) 
+# Mean cat 3 = 0.1058983
+mean(subset(datadef_BLUPs,cmean_4>0.9534589)$cmean_4) 
+# Mean cat 4 = 1.873892
+
+datadef_BLUPs<-datadef_BLUPs%>%
+  mutate(cmean_4_cat=as.factor(
+    ifelse(cmean_4<=-0.8998744,1,
+         ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
+                ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
+                       ifelse(cmean_4>0.9534589,4,NA))))))
+```
+
+```{r}
+# copy from maladaptive responses code revision - continue copying from there!
+ggplot()+
+  geom_ribbon(data=as.data.frame(
+    conditional_effects(modelBLUP_8_3_brms,
+                        effects="slope_residuals:cmean_4",
+                        dpar="zi",
+                        int_conditions=list(
+                          cmean_4=c(-1.451023,-0.5470505,
+                                    0.1058983,
+                                    1.873892)))$`slope_residuals:cmean_4`)%>%
+      mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__)%>%
+      mutate(cmean_4_cat=as.factor(
+        ifelse(cmean_4<=-0.8998744,1,
+               ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
+                      ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
+                             ifelse(cmean_4>0.9534589,4,NA)))))),
+    aes(x=slope_residuals,y=prob_fitness, group=cmean_4,
+        ymin=lower,ymax=upper,
+        fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+  geom_line(data=as.data.frame(
+    conditional_effects(modelBLUP_8_3_brms,
+                        effects="slope_residuals:cmean_4",
+                        dpar="zi",
+                        int_conditions=list(
+                          cmean_4=c(-1.451023,-0.5470505,
+                                    0.1058983,
+                                    1.873892)))$`slope_residuals:cmean_4`)%>%
+      mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__)%>%
+      mutate(cmean_4_cat=as.factor(
+        ifelse(cmean_4<=-0.8998744,1,
+               ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
+                      ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
+                             ifelse(cmean_4>0.9534589,4,NA)))))),
+    size=1,aes(x=slope_residuals,y=prob_fitness, group=cmean_4,
+               color=as.factor(round(cmean_4,2))))+
+  geom_jitter(data=datadef_BLUPs,aes(x=slope_residuals,y=fitness_01),
+              size=3,alpha=0.05,width=0,height=0.03)+
+  facet_grid(~cmean_4_cat)+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm\n(residuals of slope on intercept)")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+                     guide = guide_legend(title.position = "top",
+                                          nrow=1))+
+  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+                    guide = guide_legend(title.position = "top",
+                                         nrow=1))+
+  labs(fill="April temperature (mean-centered)",
+       colour="April temperature (mean-centered)")+
+  #theme(legend.position=c(0.42,0.9),legend.box="horizontal")
+  theme(legend.position="top",legend.box="horizontal",legend.title.align=0.5)
 ```
 
 

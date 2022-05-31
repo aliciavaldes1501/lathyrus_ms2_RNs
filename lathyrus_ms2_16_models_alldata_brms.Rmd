@@ -406,22 +406,24 @@ predict_mean_2<-ggpredict(univar.FFD_RR.all.brm,terms=c("cmean_4"),
 plot_grid(ggplot()+
             geom_line(data=data.frame(predict_id_2),
                       aes(x=x,y=predicted,group=group),
-                      color="grey",size=0.01,alpha=0.3)+
+                      color="#FF9999",size=0.01,alpha=0.3)+
             geom_line(data=data.frame(predict_mean_2),aes(x=x,y=predicted),
-                      color="black",size=1)+
+                      color="red",size=1)+
+            geom_jitter(data=datadef,aes(x=cmean_4,y=FFD),size=2,alpha=0.05,
+                        width=0.05,height=0.1)+
             my_theme()+
-            xlab("April temperature (mean-centred)")+
+            xlab("April temperature (mean-centered)")+
             ylab("Predicted FFD"),
           plot_grid(ggplot(BLUPs_MCMC.all.brms,
                            aes(x=intercept+fixef(univar.FFD_RR.all.brm)[1]))+
-                      geom_histogram(fill="lightgrey",color="black")+my_theme()+
+                      geom_histogram(fill="#FF9999",color="black")+my_theme()+
                       geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[1],
                                  size=0.5,linetype="dashed")+
                       xlab("Elevation of the reaction norm")+
                       ylab("Number of\nindividuals"),
                     ggplot(BLUPs_MCMC.all.brms,
                            aes(x=slope+fixef(univar.FFD_RR.all.brm)[2]))+
-                      geom_histogram(fill="lightgrey",color="black")+my_theme()+
+                      geom_histogram(fill="#FF9999",color="black")+my_theme()+
                       geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[2],
                                  size=0.5,linetype="dashed")+
                       xlab("Slope of the reaction norm")+
@@ -2019,8 +2021,8 @@ selcoefs<-rbind(
         cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR4))),
               data.frame(HPDinterval(mcmc(beta_post_RR4)))))%>%
     mutate(fitness_meas="mean_fitness_fl",condition="yes",
-           type=c("Selection differentials","Selection differentials",
-                  "Selection gradients","Selection gradients"),
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
            param=c("Intercept","Slope","Intercept","Slope")),
   # 2. mean_fitness_study, with shoot volume
   rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR8))),
@@ -2028,8 +2030,8 @@ selcoefs<-rbind(
         cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR8))),
               data.frame(HPDinterval(mcmc(beta_post_RR8)))))%>%
     mutate(fitness_meas="mean_fitness_study",condition="yes",
-           type=c("Selection differentials","Selection differentials",
-                  "Selection gradients","Selection gradients"),
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
            param=c("Intercept","Slope","Intercept","Slope"))
   )
 ```
@@ -2047,7 +2049,7 @@ ggplot(selcoefs,
   my_theme()+xlab(NULL)+ylab("Coefficient value")
 # black: mean_fitness_fl, grey: mean_fitness_study
 ggsave(filename="output/figures/fig2.tiff",
-        device="tiff",width=16,height=10,units="cm",dpi=300,compression="lzw")
+        device="tiff",width=9,height=8,units="cm",dpi=300,compression="lzw")
 ```
 
 # Appendix S1
