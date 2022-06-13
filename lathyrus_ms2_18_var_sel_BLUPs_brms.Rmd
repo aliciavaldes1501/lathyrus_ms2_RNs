@@ -691,7 +691,6 @@ labeller_function1 <- function(variable,value){
 ```
 
 ```{r fig.height=5, fig.width=9}
-# copy from maladaptive responses code revision - continue copying from there!
 ggplot()+
   geom_ribbon(data=as.data.frame(
     conditional_effects(modelBLUP_8_3_brms,
