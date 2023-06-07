@@ -51,7 +51,7 @@ my_theme_legend <- function(){
 
 ```{r load models, include=FALSE}
 # Load previously run models
-load("output/large_objects_BLUPs_brms.RData")
+load("output/large_objects/large_objects_BLUPs_brms.RData")
 ```
 
 # Read data and check ns
@@ -660,29 +660,29 @@ datadef_BLUPs$fitness_01<-with(datadef_BLUPs,
                                ifelse(intactseed==0,0,
                                       ifelse(intactseed>0,1,NA)))
 
-quantile(datadef_BLUPs$cmean_4)
+quantile(datadef_BLUPs$mean_4)
 
-mean(subset(datadef_BLUPs,cmean_4<=-0.8998744)$cmean_4) 
-# Mean cat 1 = -1.451023
-mean(subset(datadef_BLUPs,cmean_4>-0.8998744&cmean_4<=-0.2282078)$cmean_4) 
-# Mean cat 2 = -0.5470505
-mean(subset(datadef_BLUPs,cmean_4>-0.2282078&cmean_4<=0.9534589)$cmean_4) 
-# Mean cat 3 = 0.1058983
-mean(subset(datadef_BLUPs,cmean_4>0.9534589)$cmean_4) 
-# Mean cat 4 = 1.873892
+mean(subset(datadef_BLUPs,mean_4<=4.565000)$mean_4) 
+# Mean cat 1 = 4.013852
+mean(subset(datadef_BLUPs,mean_4>4.565000&mean_4<=5.236667)$mean_4) 
+# Mean cat 2 = 5.009445
+mean(subset(datadef_BLUPs,mean_4>5.236667&mean_4<=6.418333)$mean_4) 
+# Mean cat 3 = 5.38374
+mean(subset(datadef_BLUPs,mean_4>6.418333)$mean_4) 
+# Mean cat 4 = 7.128874
 
 datadef_BLUPs<-datadef_BLUPs%>%
-  mutate(cmean_4_cat=as.factor(
-    ifelse(cmean_4<=-0.8998744,1,
-         ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
-                ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
-                       ifelse(cmean_4>0.9534589,4,NA))))))
+  mutate(mean_4_cat=as.factor(
+    ifelse(mean_4<=-4.565000,1,
+         ifelse(mean_4>4.565000&mean_4<=5.236667,2,
+                ifelse(mean_4>5.236667&mean_4<=6.418333,3,
+                       ifelse(mean_4>6.418333,4,NA))))))
 
 label_names1 <- list(
-  '1'="First quarter\nMean April temperature\n(mean-centered) = -1.45",
-  '2'="Second quarter\nMean April temperature\n(mean-centered) = -0.55",
-  '3'="Third quarter\nMean April temperature\n(mean-centered) = 0.11",
-  '4'="Fourth quarter\nMean April temperature\n(mean-centered) = 1.87"
+  '1'="First quartile (3.69,4.57)\nMean April temperature = 4.01 ºC",
+  '2'="Second quartile [4.57,5.24)\nMean April temperature = 5.01 ºC",
+  '3'="Third quartile [5.24,6.42)\nMean April temperature = 5.38 ºC",
+  '4'="Fourth quartile [6.42,8.44)\nMean April temperature = 7.13 ºC"
 )
 
 labeller_function1 <- function(variable,value){
@@ -707,8 +707,7 @@ ggplot()+
                       ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
                              ifelse(cmean_4>0.9534589,4,NA)))))),
     aes(x=slope_residuals,y=prob_fitness, group=cmean_4,
-        ymin=lower,ymax=upper,
-        fill=as.factor(round(cmean_4,2))),alpha=0.2)+
+        ymin=lower,ymax=upper),alpha=0.2)+
   geom_line(data=as.data.frame(
     conditional_effects(modelBLUP_8_3_brms,
                         effects="slope_residuals:cmean_4",
@@ -723,26 +722,38 @@ ggplot()+
                ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
                       ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
                              ifelse(cmean_4>0.9534589,4,NA)))))),
-    size=1,aes(x=slope_residuals,y=prob_fitness, group=cmean_4,
-               color=as.factor(round(cmean_4,2))))+
-  geom_jitter(data=datadef_BLUPs,aes(x=slope_residuals,y=fitness_01),
+    size=1,aes(x=slope_residuals,y=prob_fitness, group=cmean_4))+
+  geom_jitter(data=datadef_BLUPs,aes(x=slope_residuals,y=fitness_01,
+                                     color=slope_residuals),
               size=3,alpha=0.05,width=0,height=0.03)+
   facet_grid(~cmean_4_cat,labeller=labeller(cmean_4_cat=labeller_function1))+
-  my_theme()+
-  xlab("Slope of the reaction norm (residuals of slope on intercept)")+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm\n(residuals of slope on intercept)")+
   ylab("Predicted probability of having any fitness")+
-  scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
-                     guide = guide_legend(title.position = "top",
-                                          nrow=1))+
-  scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
-                    guide = guide_legend(title.position = "top",
-                                         nrow=1))+
-  labs(fill="April temperature (mean-centered)",
-       colour="April temperature (mean-centered)")
+  scale_color_viridis(end=0.9,option = "C")+
+  # scale_color_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+  #                    guide = guide_legend(title.position = "top",
+  #                                         nrow=1))+
+  # scale_fill_manual(values=plasma(n=5,begin=0.4,end=0.9,direction=-1),
+  #                   guide = guide_legend(title.position = "top",
+  #                                        nrow=1))+
+  labs(colour="Thermal plasticity")+theme(legend.position="top")
 ggsave(filename="output/figures/fig3_extended.tiff",device="tiff",
-       width=30,height=15,units="cm",dpi=300,compression="lzw")
+       width=30,height=20,units="cm",dpi=300,compression="lzw")
+ggsave(filename="output/figures/fig3_extended.svg",device="svg",
+       width=30,height=20,units="cm",dpi=300)
 ```
 
+# NEW Figure S1 (histogram)
+
+```{r}
+datadef%>%group_by(id)%>%summarise(mean_years_fl=mean(n_years_fl_fitness))%>%
+  ggplot(aes(mean_years_fl))+
+  geom_histogram(bins=12,color="black",fill="lightgrey")+my_theme()+
+  xlab("Number of flowering events per individual")+ylab("Count")
+ggsave(filename="output/figures/histogram_appendix.tiff",
+       device="tiff",width=14,height=12,units="cm",dpi=300,compression="lzw")
+```
 
 # Appendix S1
 

@@ -1,0 +1,544 @@
+---
+title: "Spring temperature drives phenotypic selection on plasticity of flowering time"
+author : "Alicia Valdés"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.width=4, fig.height=3) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(brms)
+library(ggthemes)
+library(knitr)
+library(bayesplot)
+library(tidybayes)
+library(parallel)
+library(future)
+library(ggeffects)
+library(arm)
+library(cowplot)
+library(broom)
+library(viridis)
+library(MCMCglmm)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r load models, include=FALSE}
+# Load previously run models and stuff
+load("C:/Users/alici/Desktop/large_objects/large_objects_2.RData")
+```
+
+# Read data and check ns
+
+```{r}
+datadef<-read.csv("data/datadef.csv") 
+head(datadef)
+```
+
+Number of individuals in each period:
+
+```{r}
+length(with(subset(datadef,period=="old"),unique(id)))
+length(with(subset(datadef,period=="new"),unique(id)))
+```
+
+Number of observations in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"))
+nrow(subset(datadef,period=="new"))
+```
+
+Number of cases with FFD in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"&!is.na(FFD)))
+nrow(subset(datadef,period=="new"&!is.na(FFD)))
+```
+
+# Data preparation
+
+```{r data prep MCMCglmm, message=FALSE, warning=FALSE}
+datadef_total<-datadef %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr (0.87)
+
+# Calculate mean shoot volume for each id using values of shoot volume 
+# for all ids/years (including flowering and non-flowering years)
+
+shoot_vol_all_means<-datadef[c(1,3,10)]%>%
+  group_by(id)%>%
+  summarise(shoot_vol_mean=mean(shoot_vol,na.rm=T)) 
+# Mean of all available values 
+
+# Join shoot volume data
+datadef_total<-datadef_total%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef[c(2,3,11)]))
+head(datadef_total)
+nrow(subset(datadef_total,is.na(shoot_vol_mean))) 
+# 46 ids with no info on shoot volume
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total<-datadef_total%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,center=T,scale=F)))
+```
+
+Filter data to keep individuals that flowered in at least 2 years.
+
+```{r}
+datadef2<-datadef%>%filter(n_years_fl_fitness>1)
+nrow(filter(datadef2,!is.na(FFD))) 
+length(unique((datadef%>%filter(n_years_fl_fitness>1))$id))
+```
+
+2178 flowering events and 537 individuals.
+
+# Hypothesis 1: Univariate models
+
+## Models in Table 1
+
+### Table 1A
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r}
+my.cores <- detectCores()
+```
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm2<-brm(formula=FFD~cmean_4+(1|year),data=datadef2,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm2)
+```
+
+### Table 1B
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm2<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef2,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm2)
+```
+
+### Table 1C
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm2<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef2,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm2) 
+```
+
+#### Compare models
+
+This allows  us to test if adding among-individual variation in elevation and slope of the RN improves model fit. 
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm2 <- add_criterion(univar.FFD_yearonly.all.brm2,"loo")
+univar.FFD.all.brm2 <- add_criterion(univar.FFD.all.brm2,"loo")
+univar.FFD_RR.all.brm2 <- add_criterion(univar.FFD_RR.all.brm2,"loo")
+```
+
+```{r}
+loo_comp2<-loo_compare(univar.FFD_yearonly.all.brm2,univar.FFD.all.brm2,
+                      univar.FFD_RR.all.brm2, criterion="loo")
+```
+
+```{r}
+loo_comp2
+```
+
+The results indicate that adding a random intercept (i.e. among-individual variation in RN elevation) improves the fit, and that adding a random slope (i.e. among-individual variation in RN slope) improves the fit even more. Thus, the random regression model is the best model.
+
+#### Bayes_R2
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm2)
+bayes_R2(univar.FFD.all.brm2)
+bayes_R2(univar.FFD_RR.all.brm2)
+```
+
+#### Extract BLUPs from random regression model
+
+```{r}
+BLUPs_MCMC.all.brms2  <- cbind(as.factor(c(1:537)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm2)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms2) <- c("id", "intercept", "intercept_sd",
+                                   "slope","slope_sd")
+with(BLUPs_MCMC.all.brms2,cor(intercept,slope)) # highly correlated!
+```
+
+Add BLUPs to data set
+
+```{r}
+datadef2<-datadef2%>%left_join(BLUPs_MCMC.all.brms2%>%
+                               dplyr::select(intercept,intercept_sd,
+                                             slope,slope_sd)%>%
+                               rownames_to_column(var="id"))
+```
+
+Save data with BLUPs
+
+```{r}
+datadef_total2<-datadef2 %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total2,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr
+
+# Join shoot volume data
+datadef_total2<-datadef_total2%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef2[c(2,3,11)]))
+head(datadef_total2)
+nrow(subset(datadef_total2,is.na(shoot_vol_mean))) 
+# 0 ids with no info on shoot volume
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total2<-datadef_total2%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,center=T,
+                                                scale=F)))
+
+datadef2<-left_join(datadef2,datadef_total2[c(1:3,8)]) 
+```
+
+```{r}
+datadef2<-datadef2%>%left_join(datadef_total2%>%
+                                 dplyr::select(id,cn_shoot_vol_mean_sqrt))
+write_csv(datadef2,file = "data/datadef2_BLUPs.csv")
+```
+
+## Hypothesis 2: Bivariate models
+
+## Models in Table 2
+
+### Table 2A
+
+Mean fitness per flowering event, with shoot volume.
+
+Using the ID-syntax to specify fitness to be correlated with the intercept and slope of FFD on temperature.
+
+Negative binomial distribution for fitness.
+
+```{r}
+bf_FFD <- bf(FFD ~ cmean_4 + (cmean_4|ID1|id) + (1|year)) # Set up model formula
+bf_fitness_shoot <- bf(round(mean_fitness_fl) ~  cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+# Specifying group-level effects of the same grouping factor (id here) 
+# to be correlated across formulas
+# Expand the | operator into |<ID>|, where <ID> can be any value (ID1 here)
+# Group-level terms with the same ID1 will be modeled as correlated 
+# if they share same grouping factor(s)
+```
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb2<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef2,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99,max_treedepth=12))
+```
+
+```{r}
+print(bivar2.all.brm.nb2,digits=3)
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.nb2)
+```
+
+#### Extract selection coefficients
+
+```{r}
+sample.gmat2 <- function(data, replicates = 6000) {
+
+  ##Initialize the results list (list of lists)
+  foo <- list(gmat = matrix(rep(0,3*3), ncol = 3))
+  results.list <- list()
+  for(j in 1:replicates) { results.list[[j]] <- foo }
+
+  for(i in 1:replicates) {
+    diag(results.list[[i]]$gmat) <- data[i,5:7]^2 #Get the diagonal
+
+    #Upper diagonal
+    results.list[[i]]$gmat[1,2] <- data[i,5]*data[i,6]*data[i,9]
+    results.list[[i]]$gmat[1,3] <- data[i,5]*data[i,7]*data[i,10]
+    results.list[[i]]$gmat[2,3] <- data[i,6]*data[i,7]*data[i,11]
+
+    #Lower diagonal
+    results.list[[i]]$gmat[2,1] <- results.list[[i]]$gmat[1,2]
+    results.list[[i]]$gmat[3,1] <- results.list[[i]]$gmat[1,3]
+    results.list[[i]]$gmat[3,2] <- results.list[[i]]$gmat[2,3]
+
+  }
+
+  return(results.list)
+}
+```
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb2_post <- posterior_samples(bivar2.all.brm.nb2)
+bivar2.all.brm.nb2_post <- as.mcmc(bivar2.all.brm.nb2_post)
+
+sampled.gmat13 <- sample.gmat2(bivar2.all.brm.nb2_post, replicates = 6000) 
+
+sgmat13 <- lapply(sampled.gmat13, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat13 <- unname(sapply(sgmat13, '[[', 1)) #Change to matrix
+
+sgmat13 <- t(sgmat13)
+
+P.modelBV_RR13 <- sgmat13
+P.modelBV_RR13.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR13.mode[k] <- posterior.mode(mcmc(sgmat13[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR13 <- sgmat13[,c(3,6)]
+colnames(S.modelBV_RR13) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR13.mode <- P.modelBV_RR13.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR13))
+HPDinterval(mcmc(S.modelBV_RR13))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR13 <- matrix(NA, nrow(S.modelBV_RR13) ,2)
+
+for (i in 1:nrow(S.modelBV_RR13)) {
+  P3_13 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_13[k] <- P.modelBV_RR13[i, k] }  
+  P2_13 <- P3_13[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S13 <- P3_13[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR13[i,] <- solve(P2_13) %*% S13   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR13) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR13))
+HPDinterval(mcmc(beta_post_RR13))
+```
+
+### Table 2B
+
+Mean fitness per year of study, with shoot volume.
+
+Negative binomial distribution for fitness.
+
+```{r message=FALSE, warning=FALSE}
+bf_fitness_study_shoot <- bf(round(mean_fitness_study) ~  
+                               cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+```
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb2<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef2,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(bivar4.all.brm.nb2,digits=3) 
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.nb2)
+```
+
+#### Extract selection coefficients
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb2_post <- posterior_samples(bivar4.all.brm.nb2)
+bivar4.all.brm.nb2_post <- as.mcmc(bivar4.all.brm.nb2_post)
+
+sampled.gmat14 <- sample.gmat2(bivar4.all.brm.nb2_post, replicates = 6000) 
+
+sgmat14 <- lapply(sampled.gmat14, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat14 <- unname(sapply(sgmat14, '[[', 1)) #Change to matrix
+
+sgmat14 <- t(sgmat14)
+
+P.modelBV_RR14 <- sgmat14
+P.modelBV_RR14.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR14.mode[k] <- posterior.mode(mcmc(sgmat14[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR14 <- sgmat14[,c(3,6)]
+colnames(S.modelBV_RR14) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR14.mode <- P.modelBV_RR14.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR14))
+HPDinterval(mcmc(S.modelBV_RR14))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR14 <- matrix(NA, nrow(S.modelBV_RR14) ,2)
+
+for (i in 1:nrow(S.modelBV_RR14)) {
+  P3_14 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_14[k] <- P.modelBV_RR14[i, k] }  
+  P2_14 <- P3_14[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S14 <- P3_14[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR14[i,] <- solve(P2_14) %*% S14   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR14) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR14))
+HPDinterval(mcmc(beta_post_RR14))
+```
+
+### Figure: Selection differentials and gradients
+
+```{r}
+selcoefs<-rbind(
+  # mean_fitness_fl, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR13))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR13)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR13))),
+              data.frame(HPDinterval(mcmc(beta_post_RR13)))))%>%
+    mutate(fitness_meas="mean_fitness_fl",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope")),
+  # mean_fitness_study, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR14))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR14)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR14))),
+              data.frame(HPDinterval(mcmc(beta_post_RR14)))))%>%
+    mutate(fitness_meas="mean_fitness_study",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope"))
+  )
+```
+
+```{r}
+ggplot(selcoefs,
+       aes(x=param,y=coef,color=fitness_meas))+
+  geom_errorbar(aes(ymin=lower, ymax=upper),
+                width=.2,position=position_dodge(.3))+
+  geom_point(size=2,position=position_dodge(.3))+
+  facet_wrap(~type)+
+  geom_hline(yintercept=0,lty=3)+
+  scale_color_manual(values=c("black","darkgrey"))+
+  scale_y_continuous(breaks=c(-2,-1,0,1,2,3,4))+
+  my_theme()+xlab(NULL)+ylab("Coefficient value")
+# black: mean_fitness_fl, grey: mean_fitness_study
+```
+
+## Hypothesis 3
+
+```{r}
+datadef2_BLUPs<-read.csv("data/datadef2_BLUPs.csv") 
+head(datadef2_BLUPs)
+```
+
+## Model in Table 3
+
+Calculate residuals of linear model of slope of the RN on the intercept of the RN, and use these residuals as explanatory variable.
+
+```{r}
+model_residuals2<-lm(slope~intercept,datadef2_BLUPs)
+summary(model_residuals2)
+datadef2_BLUPs$slope_residuals<-residuals(model_residuals2)
+hist(datadef2_BLUPs$slope_residuals)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_8_3_brms2<-brm(bf(round(intactseed)~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef2_BLUPs,
+                        warmup = 1000,iter = 5000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(modelBLUP_8_3_brms2,digits=3)
+```
+
+```{r}
+conditional_effects(modelBLUP_8_3_brms2,effects="slope_residuals:cmean_4",
+                    dpar="zi")
+```
+
+# Session information
+
+```{r include=FALSE}
+sessionInfo()
+```

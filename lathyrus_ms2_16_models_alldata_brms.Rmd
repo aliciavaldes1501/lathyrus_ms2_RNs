@@ -53,7 +53,7 @@ my_theme_legend <- function(){
 
 ```{r load models, include=FALSE}
 # Load previously run models and stuff
-load("output/large_objects.RData")
+load("output/large_objects/large_objects.RData")
 ```
 
 # Read data and check ns
@@ -403,27 +403,34 @@ predict_mean_2<-ggpredict(univar.FFD_RR.all.brm,terms=c("cmean_4"),
 ```
 
 ```{r fig.height=10, fig.width=12}
+data_fig1<-full_join(data.frame(predict_id_2),
+          datadef%>%dplyr::select(id,slope)%>%group_by(id)%>%
+            summarise(slope=mean(slope))%>%rename(group=id))
 plot_grid(ggplot()+
-            geom_line(data=data.frame(predict_id_2),
-                      aes(x=x,y=predicted,group=group),
-                      color="#FF9999",size=0.01,alpha=0.3)+
-            geom_line(data=data.frame(predict_mean_2),aes(x=x,y=predicted),
-                      color="red",size=1)+
-            geom_jitter(data=datadef,aes(x=cmean_4,y=FFD),size=2,alpha=0.05,
-                        width=0.05,height=0.1)+
-            my_theme()+
-            xlab("April temperature (mean-centered)")+
-            ylab("Predicted FFD"),
+  geom_line(data=subset(data_fig1,group!="new_46"|group!="new_131"),
+            aes(x=x,y=predicted,group=group,color=slope),
+            size=0.01,alpha=0.7)+
+  scale_color_viridis(end=0.9,option = "C")+
+  geom_line(data=subset(data_fig1,group=="new_46"|group=="new_131"),
+            aes(x=x,y=predicted,group=group,color=slope),
+            size=1,linetype=2)+
+  geom_line(data=data.frame(predict_mean_2),aes(x=x,y=predicted),
+            color="black",size=1)+
+  geom_point(data=subset(datadef,id=="new_46"|id=="new_131"),
+             aes(x=cmean_4,y=FFD,color=slope),size=3,alpha=1)+
+  my_theme()+
+  xlab("April temperature (mean-centered)")+
+  ylab("Predicted FFD"),
           plot_grid(ggplot(BLUPs_MCMC.all.brms,
                            aes(x=intercept+fixef(univar.FFD_RR.all.brm)[1]))+
-                      geom_histogram(fill="#FF9999",color="black")+my_theme()+
+                      geom_histogram(fill="grey",color="black")+my_theme()+
                       geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[1],
                                  size=0.5,linetype="dashed")+
                       xlab("Elevation of the reaction norm")+
                       ylab("Number of\nindividuals"),
                     ggplot(BLUPs_MCMC.all.brms,
                            aes(x=slope+fixef(univar.FFD_RR.all.brm)[2]))+
-                      geom_histogram(fill="#FF9999",color="black")+my_theme()+
+                      geom_histogram(fill="grey",color="black")+my_theme()+
                       geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[2],
                                  size=0.5,linetype="dashed")+
                       xlab("Slope of the reaction norm")+
