@@ -1,0 +1,2375 @@
+---
+title: "Spring temperature drives phenotypic selection on plasticity of flowering time"
+author : "Alicia Valdés"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_notebook:
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.width=4, fig.height=3) 
+```
+
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(brms)
+library(ggthemes)
+library(knitr)
+library(bayesplot)
+library(tidybayes)
+library(parallel)
+library(future)
+library(ggeffects)
+library(arm)
+library(cowplot)
+library(broom)
+library(viridis)
+library(MCMCglmm)
+library(gridExtra)
+```
+
+```{r Define ggplot themes, include=FALSE}
+my_theme <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(legend.position="none")+theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+my_theme_legend <- function(){
+  theme_base()+theme(plot.background=element_rect(fill="white", colour=NA))+
+  theme(text=element_text(family="serif"))+
+  theme(plot.title = element_text(hjust =-0.06))
+}
+```
+
+```{r load models, include=FALSE}
+# Load previously run models and stuff
+load("C:/Users/alici/Desktop/large_objects/large_objects.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_BLUPs_brms.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_periods.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_var.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_2.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_3.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_4.RData")
+load("C:/Users/alici/Desktop/large_objects/large_objects_ndayszero.RData")
+```
+
+# Read data and check ns
+
+```{r}
+datadef<-read.csv("data/datadef.csv") 
+head(datadef)
+```
+
+Number of individuals in each period:
+
+```{r}
+length(with(subset(datadef,period=="old"),unique(id)))
+length(with(subset(datadef,period=="new"),unique(id)))
+```
+
+Number of observations in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"))
+nrow(subset(datadef,period=="new"))
+```
+
+Number of cases with FFD in each period:
+
+```{r}
+nrow(subset(datadef,period=="old"&!is.na(FFD)))
+nrow(subset(datadef,period=="new"&!is.na(FFD)))
+```
+
+# Data preparation
+
+```{r data prep MCMCglmm, message=FALSE, warning=FALSE}
+datadef_total<-datadef %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr (0.87)
+
+# Calculate mean shoot volume for each id using values of shoot volume 
+# for all ids/years (including flowering and non-flowering years)
+
+shoot_vol_all_means<-datadef[c(1,3,10)]%>%
+  group_by(id)%>%
+  summarise(shoot_vol_mean=mean(shoot_vol,na.rm=T)) 
+# Mean of all available values 
+
+# Join shoot volume data
+datadef_total<-datadef_total%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef[c(2,3,11)]))
+head(datadef_total)
+nrow(subset(datadef_total,is.na(shoot_vol_mean))) 
+# 46 ids with no info on shoot volume
+
+# Add first_yr to total data (this was needed for MCMCglmm models) 
+datadef_total$first_yr<-ifelse(grepl("old",as.character(datadef_total$id)),
+                               1987,2006)
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total<-datadef_total%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,
+                                                center=T,scale=F)))
+```
+
+# Hypothesis 1: Univariate models
+
+## Models in Table 1
+
+### Table 1A
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r}
+my.cores <- detectCores()
+```
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm<-brm(formula=FFD~cmean_4+(1|year),data=datadef,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm)
+```
+
+### Table 1B
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm)
+```
+
+### Table 1C
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm) 
+```
+
+### Compare models
+
+This allows  us to test if adding among-individual variation in elevation and slope of the RN improves model fit. 
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm <- add_criterion(univar.FFD_yearonly.all.brm,"loo")
+univar.FFD.all.brm <- add_criterion(univar.FFD.all.brm,"loo")
+univar.FFD_RR.all.brm <- add_criterion(univar.FFD_RR.all.brm,"loo")
+```
+
+```{r}
+loo_comp<-loo_compare(univar.FFD_yearonly.all.brm,univar.FFD.all.brm,
+                      univar.FFD_RR.all.brm, criterion="loo")
+```
+
+```{r}
+loo_comp
+```
+
+The results indicate that adding a random intercept (i.e. among-individual variation in RN elevation) improves the fit, and that adding a random slope (i.e. among-individual variation in RN slope) improves the fit even more. Thus, the random regression model is the best model.
+
+### Bayes_R2
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm)
+bayes_R2(univar.FFD.all.brm)
+bayes_R2(univar.FFD_RR.all.brm)
+```
+
+### Extract BLUPs from random regression model
+
+```{r}
+BLUPs_MCMC.all.brms  <- cbind(as.factor(c(1:837)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms) <- c("id", "intercept", "intercept_sd",
+                                   "slope","slope_sd")
+with(BLUPs_MCMC.all.brms,cor(intercept,slope)) # highly correlated!
+```
+
+Add BLUPs to data set
+
+```{r}
+datadef<-datadef%>%left_join(BLUPs_MCMC.all.brms%>%
+                               dplyr::select(intercept,intercept_sd,
+                                             slope,slope_sd)%>%
+                               rownames_to_column(var="id"))
+```
+
+### Figure 1
+
+```{r}
+predict_id_2<-ggpredict(univar.FFD_RR.all.brm,
+                      terms=c("cmean_4","id"),type="random")
+predict_mean_2<-ggpredict(univar.FFD_RR.all.brm,terms=c("cmean_4"),
+                          type="random")
+```
+
+```{r fig.height=10, fig.width=12}
+data_fig1<-full_join(data.frame(predict_id_2),
+          datadef%>%dplyr::select(id,slope)%>%group_by(id)%>%
+            summarise(slope=mean(slope))%>%rename(group=id))
+plot_grid(ggplot()+
+  geom_line(data=subset(data_fig1,group!="new_46"|group!="new_131"),
+            aes(x=x,y=predicted,group=group,color=slope),
+            size=0.01,alpha=0.7)+
+  scale_color_viridis(end=0.9,option = "C")+
+  geom_line(data=subset(data_fig1,group=="new_46"|group=="new_131"),
+            aes(x=x,y=predicted,group=group,color=slope),
+            size=1,linetype=2)+
+  geom_line(data=data.frame(predict_mean_2),aes(x=x,y=predicted),
+            color="black",size=1)+
+  geom_point(data=subset(datadef,id=="new_46"|id=="new_131"),
+             aes(x=cmean_4,y=FFD,color=slope),size=3,alpha=1)+
+  my_theme()+
+  xlab("April temperature (mean-centered)")+
+  ylab("Predicted FFD"),
+          plot_grid(ggplot(BLUPs_MCMC.all.brms,
+                           aes(x=intercept+fixef(univar.FFD_RR.all.brm)[1]))+
+                      geom_histogram(fill="grey",color="black")+my_theme()+
+                      geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[1],
+                                 size=0.5,linetype="dashed")+
+                      xlab("Elevation of the reaction norm")+
+                      ylab("Number of\nindividuals"),
+                    ggplot(BLUPs_MCMC.all.brms,
+                           aes(x=slope+fixef(univar.FFD_RR.all.brm)[2]))+
+                      geom_histogram(fill="grey",color="black")+my_theme()+
+                      geom_vline(xintercept=fixef(univar.FFD_RR.all.brm)[2],
+                                 size=0.5,linetype="dashed")+
+                      xlab("Slope of the reaction norm")+
+                      ylab("Number of\nindividuals"),
+                    ncol=1,labels=c("B)","C)"),label_fontfamily="serif"),
+          labels = c("A)",""),label_fontfamily="serif",rel_widths = c(2,1.5))
+ggsave(filename="output/figures/fig1.tiff",
+       device="tiff",width=22,height=12,units="cm",dpi=300,compression="lzw")
+```
+
+Save data with BLUPs
+
+```{r}
+datadef<-datadef%>%left_join(datadef_total%>%
+                               dplyr::select(id,cn_shoot_vol_mean_sqrt))
+write_csv(datadef,file = "data/datadef_BLUPs.csv")
+```
+
+# Hypothesis 2: Bivariate models
+
+## Models in Table 2
+
+### Table 2A
+
+Mean fitness per flowering event, with shoot volume.
+
+Using the ID-syntax to specify fitness to be correlated with the intercept and slope of FFD on temperature.
+
+```{r message=FALSE, warning=FALSE}
+datadef<-left_join(datadef,datadef_total[c(1:3,9)]) 
+# Add info on mean fitness and mean shoot volume
+bf_FFD <- bf(FFD ~ cmean_4 + (cmean_4|ID1|id) + (1|year)) # Set up model formula
+bf_fitness_shoot <- bf(round(mean_fitness_fl) ~  cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+# Specifying group-level effects of the same grouping factor (id here) 
+# to be correlated across formulas
+# Expand the | operator into |<ID>|, where <ID> can be any value (ID1 here)
+# Group-level terms with the same ID1 will be modeled as correlated 
+# if they share same grouping factor(s)
+```
+
+Negative binomial distribution for fitness.
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(bivar2.all.brm.nb,digits=3)
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.nb)
+```
+
+#### Extract selection coefficients
+
+```{r}
+sample.gmat2 <- function(data, replicates = 6000) {
+
+  ##Initialize the results list (list of lists)
+  foo <- list(gmat = matrix(rep(0,3*3), ncol = 3))
+  results.list <- list()
+  for(j in 1:replicates) { results.list[[j]] <- foo }
+
+  for(i in 1:replicates) {
+    diag(results.list[[i]]$gmat) <- data[i,5:7]^2 #Get the diagonal
+
+    #Upper diagonal
+    results.list[[i]]$gmat[1,2] <- data[i,5]*data[i,6]*data[i,9]
+    results.list[[i]]$gmat[1,3] <- data[i,5]*data[i,7]*data[i,10]
+    results.list[[i]]$gmat[2,3] <- data[i,6]*data[i,7]*data[i,11]
+
+    #Lower diagonal
+    results.list[[i]]$gmat[2,1] <- results.list[[i]]$gmat[1,2]
+    results.list[[i]]$gmat[3,1] <- results.list[[i]]$gmat[1,3]
+    results.list[[i]]$gmat[3,2] <- results.list[[i]]$gmat[2,3]
+
+  }
+
+  return(results.list)
+}
+```
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb_post <- posterior_samples(bivar2.all.brm.nb)
+bivar2.all.brm.nb_post <- as.mcmc(bivar2.all.brm.nb_post)
+#head(bivar2.all.brm.nb_post)[,1:20]
+
+# [,5] sd_id__FFD_Intercept
+# [,6] sd_id__FFD_cmean_4
+# [,7] sd_id__roundmeanfitnessfl_Intercept 
+# [,9] cor_id__FFD_Intercept__FFD_cmean_4
+# [,10] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,11] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat4 <- sample.gmat2(bivar2.all.brm.nb_post, replicates = 6000) 
+
+sgmat4 <- lapply(sampled.gmat4, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat4 <- unname(sapply(sgmat4, '[[', 1)) #Change to matrix
+
+sgmat4 <- t(sgmat4)
+
+P.modelBV_RR4 <- sgmat4
+P.modelBV_RR4.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR4.mode[k] <- posterior.mode(mcmc(sgmat4[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR4 <- sgmat4[,c(3,6)]
+colnames(S.modelBV_RR4) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR4.mode <- P.modelBV_RR4.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR4))
+HPDinterval(mcmc(S.modelBV_RR4))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR4 <- matrix(NA, nrow(S.modelBV_RR4) ,2)
+
+for (i in 1:nrow(S.modelBV_RR4)) {
+  P3_4 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_4[k] <- P.modelBV_RR4[i, k] }  
+  P2_4 <- P3_4[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S4 <- P3_4[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR4[i,] <- solve(P2_4) %*% S4   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR4) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR4))
+HPDinterval(mcmc(beta_post_RR4))
+```
+
+### Table 2B
+
+Mean fitness per year of study, with shoot volume.
+
+```{r message=FALSE, warning=FALSE}
+bf_fitness_study_shoot <- bf(round(mean_fitness_study) ~  
+                               cn_shoot_vol_mean_sqrt +
+                         (1|ID1|id)) # Set up model formula
+```
+
+Negative binomial distribution for fitness.
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef,warmup = 1000,iter = 4000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(bivar4.all.brm.nb,digits=3) 
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.nb)
+```
+
+#### Extract selection coefficients
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb_post <- posterior_samples(bivar4.all.brm.nb)
+bivar4.all.brm.nb_post <- as.mcmc(bivar4.all.brm.nb_post)
+#head(bivar4.all.brm.nb_post)[,1:20]
+
+# [,4] sd_id__FFD_Intercept
+# [,5] sd_id__FFD_cmean_4
+# [,6] sd_id__roundmeanfitnessfl_Intercept 
+# [,8] cor_id__FFD_Intercept__FFD_cmean_4
+# [,9] cor_id__FFD_Intercept__roundmeanfitnessfl_Intercept
+# [,10] cor_id__FFD_cmean_4__roundmeanfitnessfl_Intercept
+
+sampled.gmat8 <- sample.gmat2(bivar4.all.brm.nb_post, replicates = 6000) 
+
+sgmat8 <- lapply(sampled.gmat8, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat8 <- unname(sapply(sgmat8, '[[', 1)) #Change to matrix
+
+sgmat8 <- t(sgmat8)
+
+P.modelBV_RR8 <- sgmat8
+P.modelBV_RR8.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR8.mode[k] <- posterior.mode(mcmc(sgmat8[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR8 <- sgmat8[,c(3,6)]
+colnames(S.modelBV_RR8) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR8.mode <- P.modelBV_RR8.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR8))
+HPDinterval(mcmc(S.modelBV_RR8))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR8 <- matrix(NA, nrow(S.modelBV_RR8) ,2)
+
+for (i in 1:nrow(S.modelBV_RR8)) {
+  P3_8 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_8[k] <- P.modelBV_RR8[i, k] }  
+  P2_8 <- P3_8[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S8 <- P3_8[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR8[i,] <- solve(P2_8) %*% S8   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR8) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR8))
+HPDinterval(mcmc(beta_post_RR8))
+```
+
+### Figure 2: Selection differentials and gradients
+
+```{r}
+selcoefs<-rbind(
+  # mean_fitness_fl, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR4))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR4)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR4))),
+              data.frame(HPDinterval(mcmc(beta_post_RR4)))))%>%
+    mutate(fitness_meas="mean_fitness_fl",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope")),
+  # mean_fitness_study, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR8))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR8)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR8))),
+              data.frame(HPDinterval(mcmc(beta_post_RR8)))))%>%
+    mutate(fitness_meas="mean_fitness_study",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope"))
+  )
+```
+
+```{r}
+ggplot(selcoefs,
+       aes(x=param,y=coef,color=fitness_meas))+
+  geom_errorbar(aes(ymin=lower, ymax=upper),
+                width=.2,position=position_dodge(.3))+
+  geom_point(size=2,position=position_dodge(.3))+
+  facet_wrap(~type)+
+  geom_hline(yintercept=0,lty=3)+
+  scale_color_manual(values=c("black","darkgrey"))+
+  scale_y_continuous(breaks=c(-2,-1,0,1,2,3,4))+
+  my_theme()+xlab(NULL)+ylab("Coefficient value")
+# black: mean_fitness_fl, grey: mean_fitness_study
+ggsave(filename="output/figures/fig2.tiff",
+        device="tiff",width=9,height=8,units="cm",dpi=300,compression="lzw")
+```
+
+# Hypothesis 3
+
+```{r}
+datadef_BLUPs<-read.csv("data/datadef_BLUPs.csv") 
+head(datadef_BLUPs)
+```
+
+## Model in Table 3
+
+Calculate residuals of linear model of slope of the RN on the intercept of the RN, and use these residuals as explanatory variable.
+
+```{r}
+model_residuals<-lm(slope~intercept,datadef_BLUPs)
+summary(model_residuals)
+datadef_BLUPs$slope_residuals<-residuals(model_residuals)
+hist(datadef_BLUPs$slope_residuals)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_8_3_brms<-brm(bf(round(intactseed)~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.85))
+```
+
+```{r}
+print(modelBLUP_8_3_brms,digits=3)
+```
+
+## Figure 3
+
+```{r}
+datadef_BLUPs$fitness_01<-with(datadef_BLUPs,
+                               ifelse(intactseed==0,0,
+                                      ifelse(intactseed>0,1,NA)))
+
+quantile(datadef_BLUPs$mean_4)
+
+mean(subset(datadef_BLUPs,mean_4<=4.565000)$mean_4) 
+# Mean cat 1 = 4.013852
+mean(subset(datadef_BLUPs,mean_4>4.565000&mean_4<=5.236667)$mean_4) 
+# Mean cat 2 = 5.009445
+mean(subset(datadef_BLUPs,mean_4>5.236667&mean_4<=6.418333)$mean_4) 
+# Mean cat 3 = 5.38374
+mean(subset(datadef_BLUPs,mean_4>6.418333)$mean_4) 
+# Mean cat 4 = 7.128874
+
+datadef_BLUPs<-datadef_BLUPs%>%
+  mutate(mean_4_cat=as.factor(
+    ifelse(mean_4<=-4.565000,1,
+         ifelse(mean_4>4.565000&mean_4<=5.236667,2,
+                ifelse(mean_4>5.236667&mean_4<=6.418333,3,
+                       ifelse(mean_4>6.418333,4,NA))))))
+
+label_names1 <- list(
+  '1'="First quartile (3.69,4.57)\nMean April temperature = 4.01 ºC",
+  '2'="Second quartile [4.57,5.24)\nMean April temperature = 5.01 ºC",
+  '3'="Third quartile [5.24,6.42)\nMean April temperature = 5.38 ºC",
+  '4'="Fourth quartile [6.42,8.44)\nMean April temperature = 7.13 ºC"
+)
+
+labeller_function1 <- function(variable,value){
+  return(label_names1[value])
+}
+```
+
+```{r fig.height=5, fig.width=9}
+ggplot()+
+  geom_ribbon(data=as.data.frame(
+    conditional_effects(modelBLUP_8_3_brms,
+                        effects="slope_residuals:cmean_4",
+                        dpar="zi",
+                        int_conditions=list(
+                          cmean_4=c(-1.451023,-0.5470505,
+                                    0.1058983,
+                                    1.873892)))$`slope_residuals:cmean_4`)%>%
+      mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__)%>%
+      mutate(cmean_4_cat=as.factor(
+        ifelse(cmean_4<=-0.8998744,1,
+               ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
+                      ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
+                             ifelse(cmean_4>0.9534589,4,NA)))))),
+    aes(x=slope_residuals,y=prob_fitness, group=cmean_4,
+        ymin=lower,ymax=upper),alpha=0.2)+
+  geom_line(data=as.data.frame(
+    conditional_effects(modelBLUP_8_3_brms,
+                        effects="slope_residuals:cmean_4",
+                        dpar="zi",
+                        int_conditions=list(
+                          cmean_4=c(-1.451023,-0.5470505,
+                                    0.1058983,
+                                    1.873892)))$`slope_residuals:cmean_4`)%>%
+      mutate(prob_fitness=1-estimate__,lower=1-lower__,upper=1-upper__)%>%
+      mutate(cmean_4_cat=as.factor(
+        ifelse(cmean_4<=-0.8998744,1,
+               ifelse(cmean_4>-0.8998744&cmean_4<=-0.2282078,2,
+                      ifelse(cmean_4>-0.2282078&cmean_4<=0.9534589,3,
+                             ifelse(cmean_4>0.9534589,4,NA)))))),
+    size=1,aes(x=slope_residuals,y=prob_fitness, group=cmean_4))+
+  geom_jitter(data=datadef_BLUPs,aes(x=slope_residuals,y=fitness_01,
+                                     color=slope_residuals),
+              size=3,alpha=0.05,width=0,height=0.03)+
+  facet_grid(~cmean_4_cat,labeller=labeller(cmean_4_cat=labeller_function1))+
+  my_theme_legend()+
+  xlab("Slope of the reaction norm\n(residuals of slope on intercept)")+
+  ylab("Predicted probability of having any fitness")+
+  scale_color_viridis(end=0.9,option = "C")+
+  labs(colour="Thermal plasticity")+theme(legend.position="top")
+ggsave(filename="output/figures/fig3_extended.tiff",device="tiff",
+       width=30,height=20,units="cm",dpi=300,compression="lzw")
+```
+
+# Supporting information
+
+## Model in Table S3
+
+```{r eval=FALSE, include=FALSE}
+# Model with zero-inflation
+modelBLUP_2_3_brms<-brm(bf(round(intactseed)~slope*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                        zi~slope*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(modelBLUP_2_3_brms,digits=3)
+```
+
+## Models in Table S4
+
+Filter data to keep individuals that flowered in at least 2 years.
+
+```{r}
+datadef2<-datadef%>%filter(n_years_fl_fitness>1)
+nrow(filter(datadef2,!is.na(FFD))) 
+length(unique((datadef%>%filter(n_years_fl_fitness>1))$id))
+```
+
+2178 flowering events and 537 individuals.
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm2<-brm(formula=FFD~cmean_4+(1|year),data=datadef2,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm2)
+```
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm2<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef2,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm2)
+```
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm2<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef2,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm2) 
+```
+
+Compare models:
+
+This allows  us to test if adding among-individual variation in elevation and slope of the RN improves model fit. 
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm2 <- add_criterion(univar.FFD_yearonly.all.brm2,"loo")
+univar.FFD.all.brm2 <- add_criterion(univar.FFD.all.brm2,"loo")
+univar.FFD_RR.all.brm2 <- add_criterion(univar.FFD_RR.all.brm2,"loo")
+```
+
+```{r}
+loo_comp2<-loo_compare(univar.FFD_yearonly.all.brm2,univar.FFD.all.brm2,
+                      univar.FFD_RR.all.brm2, criterion="loo")
+```
+
+```{r}
+loo_comp2
+```
+
+The results indicate that adding a random intercept (i.e. among-individual variation in RN elevation) improves the fit, and that adding a random slope (i.e. among-individual variation in RN slope) improves the fit even more. Thus, the random regression model is the best model.
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm2)
+bayes_R2(univar.FFD.all.brm2)
+bayes_R2(univar.FFD_RR.all.brm2)
+```
+
+Extract BLUPs from random regression model
+
+```{r}
+BLUPs_MCMC.all.brms2  <- cbind(as.factor(c(1:537)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm2)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms2) <- c("id", "intercept", "intercept_sd",
+                                   "slope","slope_sd")
+with(BLUPs_MCMC.all.brms2,cor(intercept,slope)) # highly correlated!
+```
+
+Add BLUPs to data set
+
+```{r}
+datadef2<-datadef2%>%left_join(BLUPs_MCMC.all.brms2%>%
+                               dplyr::select(intercept,intercept_sd,
+                                             slope,slope_sd)%>%
+                               rownames_to_column(var="id"))
+```
+
+Save data with BLUPs
+
+```{r}
+datadef_total2<-datadef2 %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total2,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr
+
+# Join shoot volume data
+datadef_total2<-datadef_total2%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef2[c(2,3,11)]))
+head(datadef_total2)
+nrow(subset(datadef_total2,is.na(shoot_vol_mean))) 
+# 0 ids with no info on shoot volume
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total2<-datadef_total2%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,center=T,
+                                                scale=F)))
+
+datadef2<-left_join(datadef2,datadef_total2[c(1:3,8)]) 
+```
+
+```{r}
+datadef2<-datadef2%>%left_join(datadef_total2%>%
+                                 dplyr::select(id,cn_shoot_vol_mean_sqrt))
+write_csv(datadef2,file = "data/datadef2_BLUPs.csv")
+```
+
+## Models in Table S5
+
+Filter data to keep individuals that flowered in at least 3 years.
+
+```{r}
+datadef3<-datadef%>%filter(n_years_fl_fitness>2)
+nrow(filter(datadef3,!is.na(FFD))) 
+length(unique((datadef%>%filter(n_years_fl_fitness>2))$id))
+```
+
+1977 flowering events and 424 individuals.
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm3<-brm(formula=FFD~cmean_4+(1|year),data=datadef3,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm3)
+```
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm3<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef3,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm3)
+```
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm3<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef3,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm3) 
+```
+
+Compare models: 
+
+This allows  us to test if adding among-individual variation in elevation and slope of the RN improves model fit. 
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm3 <- add_criterion(univar.FFD_yearonly.all.brm3,"loo")
+univar.FFD.all.brm3 <- add_criterion(univar.FFD.all.brm3,"loo")
+univar.FFD_RR.all.brm3 <- add_criterion(univar.FFD_RR.all.brm3,"loo")
+```
+
+```{r}
+loo_comp3<-loo_compare(univar.FFD_yearonly.all.brm3,univar.FFD.all.brm3,
+                      univar.FFD_RR.all.brm3, criterion="loo")
+```
+
+```{r}
+loo_comp3
+```
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm3)
+bayes_R2(univar.FFD.all.brm3)
+bayes_R2(univar.FFD_RR.all.brm3)
+```
+
+Extract BLUPs from random regression model
+
+```{r}
+BLUPs_MCMC.all.brms3  <- cbind(as.factor(c(1:424)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm3)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms3) <- c("id", "intercept", "intercept_sd",
+                                   "slope","slope_sd")
+with(BLUPs_MCMC.all.brms3,cor(intercept,slope)) # highly correlated!
+```
+
+Add BLUPs to data set
+
+```{r}
+datadef3<-datadef3%>%left_join(BLUPs_MCMC.all.brms3%>%
+                               dplyr::select(intercept,intercept_sd,
+                                             slope,slope_sd)%>%
+                               rownames_to_column(var="id"))
+```
+
+Save data with BLUPs
+
+```{r}
+datadef_total3<-datadef3 %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total3,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr (0.91)
+
+# Join shoot volume data
+datadef_total3<-datadef_total3%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef3[c(2,3,11)]))
+head(datadef_total3)
+nrow(subset(datadef_total3,is.na(shoot_vol_mean))) 
+# 0 ids with no info on shoot volume
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total3<-datadef_total3%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,center=T,
+                                                scale=F)))
+
+datadef3<-left_join(datadef3,datadef_total3[c(1:3,8)]) 
+```
+
+```{r}
+datadef3<-datadef3%>%left_join(datadef_total3%>%
+                                 dplyr::select(id,cn_shoot_vol_mean_sqrt))
+write_csv(datadef3,file = "data/datadef3_BLUPs.csv")
+```
+
+## Models in Table S6
+
+Filter data to keep individuals that flowered in at least 4 years.
+
+```{r}
+datadef4<-datadef%>%filter(n_years_fl_fitness>3)
+nrow(filter(datadef4,!is.na(FFD))) 
+length(unique((datadef%>%filter(n_years_fl_fitness>3))$id))
+```
+
+1682 flowering events and 216 individuals.
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm4<-brm(formula=FFD~cmean_4+(1|year),data=datadef4,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm4)
+```
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm4<-brm(formula=FFD~cmean_4+(1|year)+(1|id),data=datadef4,
+                warmup = 1000,iter = 4000,thin=2,chains=4,
+                # 4 chains, each with 4000 iterations
+                inits = "random",seed = 12345,cores = my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm4)
+```
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm4<-brm(formula=FFD~cmean_4+(1|year)+(cmean_4|id),
+                           data=datadef4,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm4) 
+```
+
+Compare models:
+
+This allows  us to test if adding among-individual variation in elevation and slope of the RN improves model fit. 
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm4 <- add_criterion(univar.FFD_yearonly.all.brm4,"loo")
+univar.FFD.all.brm4 <- add_criterion(univar.FFD.all.brm4,"loo")
+univar.FFD_RR.all.brm4 <- add_criterion(univar.FFD_RR.all.brm4,"loo")
+```
+
+```{r}
+loo_comp4<-loo_compare(univar.FFD_yearonly.all.brm4,univar.FFD.all.brm4,
+                      univar.FFD_RR.all.brm4, criterion="loo")
+```
+
+```{r}
+loo_comp4
+```
+
+Measure of fit: Bayesian R2, which looks at the model expected variance / (expected variance + residual variance).
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm4)
+bayes_R2(univar.FFD.all.brm4)
+bayes_R2(univar.FFD_RR.all.brm4)
+```
+
+Extract BLUPs from random regression model
+
+```{r}
+BLUPs_MCMC.all.brms4  <- cbind(as.factor(c(1:310)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm4)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms4) <- c("id", "intercept", "intercept_sd",
+                                   "slope","slope_sd")
+with(BLUPs_MCMC.all.brms4,cor(intercept,slope)) # highly correlated!
+```
+
+Add BLUPs to data set
+
+```{r}
+datadef4<-datadef4%>%left_join(BLUPs_MCMC.all.brms4%>%
+                               dplyr::select(intercept,intercept_sd,
+                                             slope,slope_sd)%>%
+                               rownames_to_column(var="id"))
+```
+
+Save data with BLUPs
+
+```{r}
+datadef_total4<-datadef4 %>%
+  group_by(id)%>%
+  # Calculate mean fitness per year of study 
+  # and mean fitness per flowering event
+  summarise(mean_fitness_study=sum(intactseed,na.rm=T)/mean(n_years_study),
+            mean_fitness_fl=sum(intactseed,na.rm=T)/mean(n_years_fl_fitness))%>%
+   arrange(.,id) # Order by id
+
+with(datadef_total4,cor(mean_fitness_study,mean_fitness_fl))  # Highly corr (0.91)
+
+# Join shoot volume data
+datadef_total4<-datadef_total4%>%left_join(shoot_vol_all_means)%>%
+  left_join(unique(datadef4[c(2,3,11)]))
+head(datadef_total4)
+nrow(subset(datadef_total4,is.na(shoot_vol_mean))) 
+# 0 ids with no info on shoot volume
+
+# Using sqrt of mean shoot volume over all years when available, centred
+datadef_total4<-datadef_total4%>%
+  mutate(shoot_vol_mean_sqrt=sqrt(shoot_vol_mean),
+         cn_shoot_vol_mean_sqrt=as.vector(scale(shoot_vol_mean_sqrt,center=T,
+                                                scale=F)))
+
+datadef4<-left_join(datadef4,datadef_total4[c(1:3,8)]) 
+```
+
+
+```{r}
+datadef4<-datadef4%>%left_join(datadef_total4%>%
+                                 dplyr::select(id,cn_shoot_vol_mean_sqrt))
+write_csv(datadef4,file = "data/datadef4_BLUPs.csv")
+```
+
+## Models in Table S7
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb2<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef2,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99,max_treedepth=12))
+```
+
+```{r}
+print(bivar2.all.brm.nb2,digits=3)
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.nb2)
+```
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb2_post <- posterior_samples(bivar2.all.brm.nb2)
+bivar2.all.brm.nb2_post <- as.mcmc(bivar2.all.brm.nb2_post)
+
+sampled.gmat13 <- sample.gmat2(bivar2.all.brm.nb2_post, replicates = 6000) 
+
+sgmat13 <- lapply(sampled.gmat13, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat13 <- unname(sapply(sgmat13, '[[', 1)) #Change to matrix
+
+sgmat13 <- t(sgmat13)
+
+P.modelBV_RR13 <- sgmat13
+P.modelBV_RR13.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR13.mode[k] <- posterior.mode(mcmc(sgmat13[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR13 <- sgmat13[,c(3,6)]
+colnames(S.modelBV_RR13) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR13.mode <- P.modelBV_RR13.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR13))
+HPDinterval(mcmc(S.modelBV_RR13))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR13 <- matrix(NA, nrow(S.modelBV_RR13) ,2)
+
+for (i in 1:nrow(S.modelBV_RR13)) {
+  P3_13 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_13[k] <- P.modelBV_RR13[i, k] }  
+  P2_13 <- P3_13[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S13 <- P3_13[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR13[i,] <- solve(P2_13) %*% S13   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR13) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR13))
+HPDinterval(mcmc(beta_post_RR13))
+```
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb2<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef2,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(bivar4.all.brm.nb2,digits=3) 
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.nb2)
+```
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb2_post <- posterior_samples(bivar4.all.brm.nb2)
+bivar4.all.brm.nb2_post <- as.mcmc(bivar4.all.brm.nb2_post)
+
+sampled.gmat14 <- sample.gmat2(bivar4.all.brm.nb2_post, replicates = 6000) 
+
+sgmat14 <- lapply(sampled.gmat14, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat14 <- unname(sapply(sgmat14, '[[', 1)) #Change to matrix
+
+sgmat14 <- t(sgmat14)
+
+P.modelBV_RR14 <- sgmat14
+P.modelBV_RR14.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR14.mode[k] <- posterior.mode(mcmc(sgmat14[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR14 <- sgmat14[,c(3,6)]
+colnames(S.modelBV_RR14) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR14.mode <- P.modelBV_RR14.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR14))
+HPDinterval(mcmc(S.modelBV_RR14))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR14 <- matrix(NA, nrow(S.modelBV_RR14) ,2)
+
+for (i in 1:nrow(S.modelBV_RR14)) {
+  P3_14 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_14[k] <- P.modelBV_RR14[i, k] }  
+  P2_14 <- P3_14[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S14 <- P3_14[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR14[i,] <- solve(P2_14) %*% S14   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR14) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR14))
+HPDinterval(mcmc(beta_post_RR14))
+```
+
+## Models in Table S8
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb3<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef3,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(bivar2.all.brm.nb3,digits=3)
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.nb3)
+```
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb3_post <- posterior_samples(bivar2.all.brm.nb3)
+bivar2.all.brm.nb3_post <- as.mcmc(bivar2.all.brm.nb3_post)
+
+sampled.gmat9 <- sample.gmat2(bivar2.all.brm.nb3_post, replicates = 6000) 
+
+sgmat9 <- lapply(sampled.gmat9, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat9 <- unname(sapply(sgmat9, '[[', 1)) #Change to matrix
+
+sgmat9 <- t(sgmat9)
+
+P.modelBV_RR9 <- sgmat9
+P.modelBV_RR9.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR9.mode[k] <- posterior.mode(mcmc(sgmat9[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR9 <- sgmat9[,c(3,6)]
+colnames(S.modelBV_RR9) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR9.mode <- P.modelBV_RR9.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR9))
+HPDinterval(mcmc(S.modelBV_RR9))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR9 <- matrix(NA, nrow(S.modelBV_RR9) ,2)
+
+for (i in 1:nrow(S.modelBV_RR9)) {
+  P3_9 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_9[k] <- P.modelBV_RR9[i, k] }  
+  P2_9 <- P3_9[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S9 <- P3_9[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR9[i,] <- solve(P2_9) %*% S9   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR9) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR9))
+HPDinterval(mcmc(beta_post_RR9))
+```
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb3<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef3,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(bivar4.all.brm.nb3,digits=3) 
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.nb3)
+```
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb3_post <- posterior_samples(bivar4.all.brm.nb3)
+bivar4.all.brm.nb3_post <- as.mcmc(bivar4.all.brm.nb3_post)
+
+sampled.gmat10 <- sample.gmat2(bivar4.all.brm.nb3_post, replicates = 6000) 
+
+sgmat10 <- lapply(sampled.gmat10, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat10 <- unname(sapply(sgmat10, '[[', 1)) #Change to matrix
+
+sgmat10 <- t(sgmat10)
+
+P.modelBV_RR10 <- sgmat10
+P.modelBV_RR10.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR10.mode[k] <- posterior.mode(mcmc(sgmat10[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR10 <- sgmat10[,c(3,6)]
+colnames(S.modelBV_RR10) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR10.mode <- P.modelBV_RR10.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR10))
+HPDinterval(mcmc(S.modelBV_RR10))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR10 <- matrix(NA, nrow(S.modelBV_RR10) ,2)
+
+for (i in 1:nrow(S.modelBV_RR10)) {
+  P3_10 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_10[k] <- P.modelBV_RR10[i, k] }  
+  P2_10 <- P3_10[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S10 <- P3_10[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR10[i,] <- solve(P2_10) %*% S10   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR10) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR10))
+HPDinterval(mcmc(beta_post_RR10))
+```
+
+## Models in Table S9
+
+```{r, eval=FALSE, include=TRUE}
+bivar2.all.brm.nb4<-brm(bf_FFD+bf_fitness_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef4,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores,
+                       control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(bivar2.all.brm.nb4,digits=3)
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar2.all.brm.nb4)
+```
+
+```{r}
+# Extract posterior samples
+bivar2.all.brm.nb4_post <- posterior_samples(bivar2.all.brm.nb4)
+bivar2.all.brm.nb4_post <- as.mcmc(bivar2.all.brm.nb4_post)
+
+sampled.gmat11 <- sample.gmat2(bivar2.all.brm.nb4_post, replicates = 6000) 
+
+sgmat11 <- lapply(sampled.gmat11, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat11 <- unname(sapply(sgmat11, '[[', 1)) #Change to matrix
+
+sgmat11 <- t(sgmat11)
+
+P.modelBV_RR11 <- sgmat11
+P.modelBV_RR11.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR11.mode[k] <- posterior.mode(mcmc(sgmat11[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR11 <- sgmat11[,c(3,6)]
+colnames(S.modelBV_RR11) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR11.mode <- P.modelBV_RR11.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR11))
+HPDinterval(mcmc(S.modelBV_RR11))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR11 <- matrix(NA, nrow(S.modelBV_RR11) ,2)
+
+for (i in 1:nrow(S.modelBV_RR11)) {
+  P3_11 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_11[k] <- P.modelBV_RR11[i, k] }  
+  P2_11 <- P3_11[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S11 <- P3_11[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR11[i,] <- solve(P2_11) %*% S11   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR11) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR11))
+HPDinterval(mcmc(beta_post_RR11))
+```
+
+```{r, eval=FALSE, include=TRUE}
+bivar4.all.brm.nb4<-brm(bf_FFD+bf_fitness_study_shoot, 
+                       family = c(gaussian,negbinomial), 
+                       data = datadef4,warmup = 1000,iter = 6000,chains=4,thin=2,
+                       inits = "random",seed = 12345,cores = my.cores)
+```
+
+```{r}
+print(bivar4.all.brm.nb4,digits=3) 
+```
+
+Measure of fit: Bayesian R2
+
+```{r}
+bayes_R2(bivar4.all.brm.nb4)
+```
+
+```{r}
+# Extract posterior samples
+bivar4.all.brm.nb4_post <- posterior_samples(bivar4.all.brm.nb4)
+bivar4.all.brm.nb4_post <- as.mcmc(bivar4.all.brm.nb4_post)
+
+sampled.gmat12 <- sample.gmat2(bivar4.all.brm.nb4_post, replicates = 6000) 
+
+sgmat12 <- lapply(sampled.gmat12, `[`, c('gmat')) #Get list 'gmat' from each list
+sgmat12 <- unname(sapply(sgmat12, '[[', 1)) #Change to matrix
+
+sgmat12 <- t(sgmat12)
+
+P.modelBV_RR12 <- sgmat12
+P.modelBV_RR12.mode <- matrix(1:9, nrow = 3)
+for (k in 1:9) P.modelBV_RR12.mode[k] <- posterior.mode(mcmc(sgmat12[,k]))
+
+# Extract selection *differentials* (i.e. covariances) for intercept and slope:
+# and calculate posterior mode and credible intervals for each
+S.modelBV_RR12 <- sgmat12[,c(3,6)]
+colnames(S.modelBV_RR12) <- c("S_intercepts", "S_slopes")
+S.modelBV_RR12.mode <- P.modelBV_RR12.mode[1:2, 3]
+
+posterior.mode(mcmc(S.modelBV_RR12))
+HPDinterval(mcmc(S.modelBV_RR12))
+
+# Estimate selection gradients for intercept and slope (beta = S / P)
+# on each sample of posterior and extract their mode
+beta_post_RR12 <- matrix(NA, nrow(S.modelBV_RR12) ,2)
+
+for (i in 1:nrow(S.modelBV_RR12)) {
+  P3_12 <- matrix(rep(NA, 9), nrow = 3) 
+  # 3x3 matrix of var-cov for individual X.int, X.slope and fitness
+  for (k in 1:9) {P3_12[k] <- P.modelBV_RR12[i, k] }  
+  P2_12 <- P3_12[1:2, 1:2]   # 2x2 matrix of just trait intercept & slope var-cov
+  S12 <- P3_12[1:2, 3]   # selection differentials on traits (last column of P3)
+  beta_post_RR12[i,] <- solve(P2_12) %*% S12   # selection gradients beta = P^-1 * S
+}
+
+colnames(beta_post_RR12) <- c("beta_intercepts", "beta_slopes")
+posterior.mode(mcmc(beta_post_RR12))
+HPDinterval(mcmc(beta_post_RR12))
+```
+
+## Models in Table S10
+
+```{r}
+datadef2_BLUPs<-read.csv("data/datadef2_BLUPs.csv") 
+head(datadef2_BLUPs)
+```
+
+```{r}
+model_residuals2<-lm(slope~intercept,datadef2_BLUPs)
+summary(model_residuals2)
+datadef2_BLUPs$slope_residuals<-residuals(model_residuals2)
+hist(datadef2_BLUPs$slope_residuals)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_8_3_brms2<-brm(bf(round(intactseed)~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef2_BLUPs,
+                        warmup = 1000,iter = 5000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(modelBLUP_8_3_brms2,digits=3)
+```
+
+```{r}
+bayes_R2(modelBLUP_8_3_brms2)
+```
+
+
+```{r}
+conditional_effects(modelBLUP_8_3_brms2,effects="slope_residuals:cmean_4",
+                    dpar="zi")
+```
+
+## Models in Table S11
+
+```{r}
+datadef3_BLUPs<-read.csv("data/datadef3_BLUPs.csv") 
+head(datadef3_BLUPs)
+```
+
+```{r}
+model_residuals3<-lm(slope~intercept,datadef3_BLUPs)
+summary(model_residuals3)
+datadef3_BLUPs$slope_residuals<-residuals(model_residuals3)
+hist(datadef3_BLUPs$slope_residuals)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_8_3_brms3<-brm(bf(round(intactseed)~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef3_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.85))
+```
+
+```{r}
+print(modelBLUP_8_3_brms3,digits=3)
+```
+
+```{r}
+bayes_R2(modelBLUP_8_3_brms3)
+```
+
+```{r}
+conditional_effects(modelBLUP_8_3_brms3,effects="slope_residuals:cmean_4",
+                    dpar="zi")
+```
+
+## Models in Table S12
+
+```{r}
+datadef4_BLUPs<-read.csv("data/datadef4_BLUPs.csv") 
+head(datadef4_BLUPs)
+```
+
+```{r}
+model_residuals4<-lm(slope~intercept,datadef4_BLUPs)
+summary(model_residuals4)
+datadef4_BLUPs$slope_residuals<-residuals(model_residuals4)
+hist(datadef4_BLUPs$slope_residuals)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Models with zero-inflation
+modelBLUP_8_3_brms4<-brm(bf(round(intactseed)~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id),
+                           zi~slope_residuals*cmean_4+
+                             cn_shoot_vol_mean_sqrt+(1|id)),
+                        family="zero_inflated_negbinomial",data=datadef4_BLUPs,
+                        warmup = 1000,iter = 4000,thin=2,chains=4,
+                        inits = "random",seed = 12345,cores = my.cores,
+                        control = list(adapt_delta = 0.99))
+```
+
+```{r}
+print(modelBLUP_8_3_brms4,digits=3)
+```
+
+```{r}
+bayes_R2(modelBLUP_8_3_brms4)
+```
+
+```{r}
+conditional_effects(modelBLUP_8_3_brms4,effects="slope_residuals:cmean_4",
+                    dpar="zi")
+```
+
+## Figure S1
+
+```{r}
+datadef%>%group_by(id)%>%summarise(mean_years_fl=mean(n_years_fl_fitness))%>%
+  ggplot(aes(mean_years_fl))+
+  geom_histogram(bins=12,color="black",fill="lightgrey")+my_theme()+
+  xlab("Number of flowering events per individual")+ylab("Count")
+ggsave(filename="output/figures/figS1.tiff",
+       device="tiff",width=14,height=12,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S2 (Model in Table 1C)
+
+```{r}
+color_scheme_set("viridis")
+arrayS1C<-as.array(univar.FFD_RR.all.brm)
+dimnames(arrayS1C)[[3]][1:7] <- c("Intercept","April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (slope)",
+                                 "Year: SD (intercept)",
+                                 "Individual:\ncorrelation (intercept, slope)",
+                                 "Sigma")
+
+mcmc_trace(arrayS1C,pars=c("Intercept","April temperature",
+                                 "Individual: SD (intercept)"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS2a.tiff",
+        device="tiff",width=20,height=21,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS1C,pars=c("Individual: SD (slope)",
+                                 "Year: SD (intercept)",
+                                 "Individual:\ncorrelation (intercept, slope)",
+                                 "Sigma"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS2b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S3 (Model in Table 1C)
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(brms::rhat(univar.FFD_RR.all.brm))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(univar.FFD_RR.all.brm))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS3.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S4 (Model in Table 1C)
+
+```{r}
+y1<-subset(datadef,!is.na(FFD))$FFD # vector of outcome values
+yrep3<-posterior_predict(univar.FFD_RR.all.brm, draws = 500)
+# matrix of draws from the posterior predictive distribution
+ppc_dens_overlay(y1, yrep3[1:100,])+my_theme_legend()+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS4.tiff",
+       device="tiff",width=12,height=8,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S5 (Model in Table 2A)
+
+```{r}
+array1<-as.array(bivar2.all.brm.nb)
+dimnames(array1)[[3]][1:12] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Vegetative size on fitness","Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+
+mcmc_trace(array1,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Vegetative size on fitness"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS5a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(array1,pars=c("Individual: SD\n(intercept of FFD)",
+                         "Individual: SD\n(slope of FFD)",
+                         "Individual: SD\n(intercept of fitness)",
+                         "Year: SD\n(intercept of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS5b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(array1,pars=c(
+  "Individual: correlation\n(intercept of FFD,slope of FFD)",
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS5c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S6 (Model in Table 2A)
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(brms::rhat(bivar2.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar2.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS6.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S7 (Model in Table 2A)
+
+```{r}
+y3_fitness<-round(subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$mean_fitness_fl)
+y3_FFD<-subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$FFD 
+# vectors of outcome values
+yrep3_fitness_nb<-posterior_predict(bivar2.all.brm.nb, 
+                                    draws = 500,resp="roundmeanfitnessfl")
+yrep3_FFD_nb<-posterior_predict(bivar2.all.brm.nb, 
+                                draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+plot_grid(ppc_dens_overlay(y3_fitness, yrep3_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y3_FFD, yrep3_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS7.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S8 (Model in Table 2B)
+
+```{r}
+arrayS3B<-as.array(bivar4.all.brm.nb)
+dimnames(arrayS3B)[[3]][1:12] <- 
+  c("Intercept of FFD","Intercept of fitness","April temperature on FFD",
+    "Vegetative size on fitness",
+    "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)",
+    "Individual: correlation\n(intercept of FFD,slope of FFD)",
+    "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+    "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD")
+mcmc_trace(arrayS3B,pars=c("Intercept of FFD","Intercept of fitness",
+                          "April temperature on FFD",
+                          "Vegetative size on fitness"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS8a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3B,pars=c(
+   "Individual: SD\n(intercept of FFD)",
+    "Individual: SD\n(slope of FFD)","Individual: SD\n(intercept of fitness)",
+    "Year: SD\n(intercept of FFD)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS8b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS3B,pars=c(
+  "Individual: correlation\n(intercept of FFD,slope of FFD)",
+  "Individual: correlation\n(intercept of FFD, intercept of fitness)",
+  "Individual: correlation\n(slope of FFD, intercept of fitness)","Sigma FFD"),
+  facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS8c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S9 (Model in Table 2B)
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(brms::rhat(bivar4.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(bivar4.all.brm.nb))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS9.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S10 (Model in Table 2B)
+
+```{r}
+y4_fitness<-round(subset(datadef,!is.na(FFD)&
+                           !is.na(cn_shoot_vol_mean_sqrt))$mean_fitness_study)
+yrep5_fitness_nb<-posterior_predict(bivar4.all.brm.nb, 
+                                    draws = 500,resp="roundmeanfitnessstudy")
+yrep5_FFD_nb<-posterior_predict(bivar4.all.brm.nb, 
+                                draws = 500,resp="FFD")
+# matrices of draws from the posterior predictive distribution
+plot_grid(ppc_dens_overlay(y4_fitness, yrep5_fitness_nb[1:100,])+
+            my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          ppc_dens_overlay(y3_FFD, yrep5_FFD_nb[1:100,])+my_theme_legend()+
+            theme(axis.ticks.y=element_blank(),axis.text.y=element_blank(),
+                  legend.position="top"),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS10.tiff",
+       device="tiff",width=24,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S11 (Model in Table 3)
+
+```{r}
+color_scheme_set("viridis")
+arrayS6<-as.array(modelBLUP_8_3_brms)
+dimnames(arrayS6)[[3]][1:13] <- c("Intercept","zi_Intercept","BLUP slope (resid.)",
+                                 "April temperature","Vegetative size",
+                                 "BLUP slope (resid.) : April temperature",
+                                 "zi_BLUP slope (resid.)","zi_April temperature",
+                                 "zi_Vegetative size",
+                                 "zi_BLUP slope (resid.) : April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (zi_intercept)","Shape")
+mcmc_trace(arrayS6,pars=c("Intercept","zi_Intercept","BLUP slope (resid.)",
+                          "April temperature"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS110a.tiff",
+        device="tiff",width=20,height=32,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("Vegetative size",
+                          "BLUP slope (resid.) : April temperature",
+                          "zi_BLUP slope (resid.)","zi_April temperature"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS11b.tiff",
+        device="tiff",width=20,height=32,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("zi_Vegetative size",
+                          "zi_BLUP slope (resid.) : April temperature",
+                          "Individual: SD (intercept)",
+                          "Individual: SD (zi_intercept)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS11c.tiff",
+        device="tiff",width=20,height=32,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS6,pars=c("Shape"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS11d.tiff",
+        device="tiff",width=20,height=8,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S12 (Model in Table 3)
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(brms::rhat(modelBLUP_8_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(modelBLUP_8_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS12.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S13 (Model in Table 3)
+
+```{r}
+y1<-round(subset(datadef_BLUPs,
+           !is.na(intactseed)&!(is.na(cn_shoot_vol_mean_sqrt)))$intactseed) 
+yrep4_3<-posterior_predict(modelBLUP_8_3_brms, draws = 500)
+ppc_dens_overlay(y1, yrep4_3[1:100,])+my_theme_legend()+xlim(0, 10)+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS13.tiff",
+       device="tiff",width=24,height=14,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S14 (Model in Table S3)
+
+```{r}
+color_scheme_set("viridis")
+arrayS5<-as.array(modelBLUP_2_3_brms)
+dimnames(arrayS5)[[3]][1:13] <- c("Intercept","zi_Intercept","BLUP slope",
+                                 "April temperature","Vegetative size",
+                                 "BLUP slope : April temperature",
+                                 "zi_BLUP slope","zi_April temperature",
+                                 "zi_Vegetative size",
+                                 "zi_BLUP slope : April temperature",
+                                 "Individual: SD (intercept)",
+                                 "Individual: SD (zi_intercept)","Shape")
+mcmc_trace(arrayS5,pars=c("Intercept","zi_Intercept","BLUP slope",
+                          "April temperature"),
+                          facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS14a.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("Vegetative size","BLUP slope : April temperature",
+                          "zi_BLUP slope","zi_April temperature"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS14b.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("zi_Vegetative size",
+                          "zi_BLUP slope : April temperature",
+                          "Individual: SD (intercept)",
+                          "Individual: SD (zi_intercept)"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS14c.tiff",
+        device="tiff",width=20,height=28,units="cm",dpi=300,compression="lzw")
+mcmc_trace(arrayS5,pars=c("Shape"),
+           facet_args = list(ncol = 1, strip.position = "left"))
+ggsave(filename="output/figures/figS14d.tiff",
+        device="tiff",width=20,height=7,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S15 (Model in Table S3)
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(mcmc_rhat_hist(brms::rhat(modelBLUP_2_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          mcmc_neff_hist(neff_ratio(modelBLUP_2_3_brms))+my_theme_legend()+
+            theme(legend.position="top")+
+            theme(legend.text=element_text(size=10)),
+          labels = c("A)","B)"),label_fontfamily="serif")
+ggsave(filename="output/figures/figS15.tiff",
+       device="tiff",width=20,height=10,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S16 (Model in Table S3)
+
+```{r}
+yrep2_3<-posterior_predict(modelBLUP_2_3_brms, draws = 500)
+ppc_dens_overlay(y1, yrep2_3[1:100,])+my_theme_legend()+xlim(0, 10)+
+  theme(axis.ticks.y = element_blank(),axis.text.y = element_blank())
+ggsave(filename="output/figures/figS16.tiff",
+       device="tiff",width=24,height=14,units="cm",dpi=300,compression="lzw")
+```
+
+## Figure S17
+
+With all ids, ids with 2-3-4 flowering events
+
+```{r}
+selcoefs<-selcoefs%>%mutate(min_n_fl_events=1)
+selcoefs2<-rbind(
+  # mean_fitness_fl, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR13))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR13)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR13))),
+              data.frame(HPDinterval(mcmc(beta_post_RR13)))))%>%
+    mutate(fitness_meas="mean_fitness_fl",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope")),
+  # mean_fitness_study, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR14))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR14)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR14))),
+              data.frame(HPDinterval(mcmc(beta_post_RR14)))))%>%
+    mutate(fitness_meas="mean_fitness_study",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope"))
+  )%>%mutate(min_n_fl_events=2)
+selcoefs3<-rbind(
+  # mean_fitness_fl, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR9))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR9)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR9))),
+              data.frame(HPDinterval(mcmc(beta_post_RR9)))))%>%
+    mutate(fitness_meas="mean_fitness_fl",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope")),
+  # mean_fitness_study, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR10))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR10)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR10))),
+              data.frame(HPDinterval(mcmc(beta_post_RR10)))))%>%
+    mutate(fitness_meas="mean_fitness_study",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope"))
+  )%>%mutate(min_n_fl_events=3)
+selcoefs4<-rbind(
+  # mean_fitness_fl, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR11))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR11)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR11))),
+              data.frame(HPDinterval(mcmc(beta_post_RR11)))))%>%
+    mutate(fitness_meas="mean_fitness_fl",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope")),
+  # mean_fitness_study, with shoot volume
+  rbind(cbind(data.frame(coef=posterior.mode(mcmc(S.modelBV_RR12))),
+              data.frame(HPDinterval(mcmc(S.modelBV_RR12)))),
+        cbind(data.frame(coef=posterior.mode(mcmc(beta_post_RR12))),
+              data.frame(HPDinterval(mcmc(beta_post_RR12)))))%>%
+    mutate(fitness_meas="mean_fitness_study",condition="yes",
+           type=c("Differentials","Differentials",
+                  "Gradients","Gradients"),
+           param=c("Intercept","Slope","Intercept","Slope"))
+  )%>%mutate(min_n_fl_events=4)
+selcoefs_all<-rbind(selcoefs,selcoefs2,selcoefs3,selcoefs4)%>%
+  mutate(min_n_fl_events=as.factor(min_n_fl_events))
+```
+
+```{r fig.height=8, fig.width=9}
+cbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", 
+               "#D55E00", "#CC79A7")
+legend_coefs<-get_legend(
+  ggplot(selcoefs_all%>%filter(fitness_meas=="mean_fitness_fl"),
+         aes(x=param,y=coef,color=min_n_fl_events))+
+    geom_errorbar(aes(ymin=lower, ymax=upper),
+                  width=.2,position=position_dodge(.3))+
+    geom_point(size=2,position=position_dodge(.3))+
+    facet_grid(cols=vars(type))+
+    geom_hline(yintercept=0,lty=3)+
+    scale_y_continuous(breaks=c(-2,-1,0,1,2,3,4))+
+    my_theme_legend()+xlab(NULL)+ylab("Coefficient value")+
+    theme(legend.position="top")+
+    scale_color_manual(name="Minimum number of flowering events",
+                         values=cbPalette))
+figS16<-grid.arrange(
+  legend_coefs,
+  ggplot(selcoefs_all%>%filter(fitness_meas=="mean_fitness_fl"),
+         aes(x=param,y=coef,color=min_n_fl_events))+
+    geom_errorbar(aes(ymin=lower, ymax=upper),
+                  width=.2,position=position_dodge(.4))+
+    geom_point(size=2,position=position_dodge(.4))+
+    facet_grid(cols=vars(type))+geom_hline(yintercept=0,lty=3)+
+    scale_y_continuous(breaks=c(-2,-1,0,1,2,3,4))+
+    my_theme()+xlab(NULL)+ylab("Coefficient value")+ggtitle("A)")+
+    theme(plot.title=element_text(vjust=-7,hjust=-0.1))+
+    scale_color_manual(values=cbPalette),
+  ggplot(selcoefs_all%>%filter(fitness_meas=="mean_fitness_study"),
+         aes(x=param,y=coef,color=min_n_fl_events))+
+    geom_errorbar(aes(ymin=lower, ymax=upper),
+                  width=.2,position=position_dodge(.4))+
+    geom_point(size=2,position=position_dodge(.4))+
+    facet_grid(cols=vars(type))+geom_hline(yintercept=0,lty=3)+
+    scale_y_continuous(breaks=c(-2,-1,0,1,2,3,4))+
+    my_theme()+xlab(NULL)+ylab("Coefficient value")+ggtitle("B)")+
+    theme(plot.title=element_text(vjust=-7,hjust=-0.1))+
+    scale_color_manual(values=cbPalette),
+  nrow=3,heights=c(0.04,0.48,0.48))
+ggsave(filename="output/figures/figS16.tiff",plot=figS16,
+        device="tiff",width=16,height=18,units="cm",dpi=300,compression="lzw")
+```
+
+# Additional analyses (response letter)
+
+## Analyses with variance in temperature
+
+Read data weather:
+
+```{r}
+data_weather<-read_csv("C:/Users/alici/Dropbox/SU/Projects/lathyrus/lathyrus_ms1/data/clean/weather_GDD.csv")
+```
+
+Calculate mean and variance for April temperatures:
+
+```{r}
+data_weather_var<-data_weather%>%filter(year==1987|year==1988|year==1989|
+                                         year==1990|year==1991|year==1992|
+                                         year==1993|year==1994|year==1995|
+                                         year==1996|year==2006|year==2007|
+                                         year==2008|year==2009|year==2010|
+                                         year==2011|year==2012|year==2013|
+                                         year==2014|year==2015|year==2016|
+                                         year==2017)%>%
+  group_by(year)%>%
+  filter(month==4)%>%
+  summarise(mean_April=mean(mean),var_April=var(mean))
+```
+
+```{r}
+datadef_var<-full_join(datadef,data_weather_var)%>%
+  mutate(mean_April_c=scale(mean_April,center=T,scale=F),
+         var_April_c=scale(var_April,center=T,scale=F))
+```
+
+FFD with random effect of year only. This model assumes no among-individual variation around the average population-level reaction norm.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm_var<-brm(formula=FFD~var_April_c+(1|year),
+                                     data=datadef_var,
+                                     warmup=1000,iter=4000,thin=2,chains=4,
+                                     # 4 chains, each with 4000 iterations
+                                     inits="random",seed=12345,cores=my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm_var)
+```
+
+CIs for variance overlap zero - no effect of variance on FFD!
+
+FFD with random effects of year and individual-intercept. This model assumes among-individual variation in reaction norm elevation.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm_var<-brm(formula=FFD~var_April_c+(1|year)+(1|id),
+                            data=datadef_var,
+                            warmup=1000,iter=4000,thin=2,chains=4,
+                            # 4 chains, each with 4000 iterations
+                            inits="random",seed=12345,cores=my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm_var)
+```
+
+Random regression for FFD, including random effects of individual slopes and covariance between intercept and slope. This model assumes among-individual variation in reaction norm elevation and slope.
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm_var<-brm(formula=FFD~var_April_c+(1|year)+(var_April_c|id),
+                           data=datadef_var,
+                           warmup=1000,iter=4000,thin=2,chains=4,
+                           inits="random",seed=12345,cores=my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm_var) 
+```
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm_var <- add_criterion(univar.FFD_yearonly.all.brm_var,"loo")
+univar.FFD.all.brm_var <- add_criterion(univar.FFD.all.brm_var,"loo")
+univar.FFD_RR.all.brm_var <- add_criterion(univar.FFD_RR.all.brm_var,"loo")
+```
+
+```{r}
+loo_comp_var<-loo_compare(univar.FFD_yearonly.all.brm_var,univar.FFD.all.brm_var,
+                      univar.FFD_RR.all.brm_var, criterion="loo")
+```
+
+```{r}
+loo_comp_var
+```
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm_var)
+bayes_R2(univar.FFD.all.brm_var)
+bayes_R2(univar.FFD_RR.all.brm_var)
+```
+
+```{r}
+BLUPs_MCMC.all.brms_var  <- cbind(as.factor(c(1:837)),
+                              as.data.frame(ranef(univar.FFD_RR.all.brm_var)$id)
+                              [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms_var) <- c("id", "intercept_var", "intercept_sd_var",
+                                   "slope_var","slope_sd_var")
+with(BLUPs_MCMC.all.brms_var,cor(intercept_var,slope_var)) # highly correlated!
+```
+
+```{r}
+datadef_var<-datadef_var%>%left_join(BLUPs_MCMC.all.brms_var%>%
+                               dplyr::select(intercept_var,intercept_sd_var,
+                                             slope_var,slope_sd_var)%>%
+                               rownames_to_column(var="id"))
+```
+
+```{r}
+predict_id_var<-ggpredict(univar.FFD_RR.all.brm_var,
+                      terms=c("var_April_c","id"),type="random")
+predict_mean_var<-ggpredict(univar.FFD_RR.all.brm_var,terms=c("var_April_c"),
+                          type="random")
+```
+
+```{r fig.height=10, fig.width=12}
+data_fig1_var<-full_join(data.frame(predict_id_var),
+          datadef_var%>%dplyr::select(id,slope_var)%>%group_by(id)%>%
+            summarise(slope_var=mean(slope_var))%>%rename(group=id))
+ggplot()+
+  geom_line(data=data_fig1_var,
+            aes(x=x,y=predicted,group=group,color=slope_var),
+            size=0.01,alpha=0.7)+
+  scale_color_viridis(end=0.9,option = "C")+
+  geom_line(data=data.frame(predict_mean_var),aes(x=x,y=predicted),
+            color="black",size=1)+
+  my_theme()+
+  xlab("Variance in April temperature (mean-centered)")+
+  ylab("Predicted FFD")
+```
+
+## Analyses with n days below zero
+
+```{r}
+n_days_min_below_zero<-data_weather%>%filter(year==1987|year==1988|year==1989|
+                                               year==1990|year==1991|year==1992|
+                                               year==1993|year==1994|year==1995|
+                                               year==1996|year==2006|year==2007|
+                                               year==2008|year==2009|year==2010|
+                                               year==2011|year==2012|year==2013|
+                                               year==2014|year==2015|year==2016|
+                                               year==2017)%>%
+  group_by(year)%>%
+  filter(month==4)%>%
+  filter(min<=0)%>%
+  summarise(n_days_min_below_zero=n())
+```
+
+```{r}
+datadef_ndayszero<-full_join(datadef,n_days_min_below_zero)%>%
+  mutate(n_days_min_below_zero_c=scale(n_days_min_below_zero,center=T,scale=F))
+```
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm_ndayszero<-brm(formula=FFD~n_days_min_below_zero_c+
+                                             (1|year),
+                                           data=datadef_ndayszero,
+                                     warmup=1000,iter=4000,thin=2,chains=4,
+                                     # 4 chains, each with 4000 iterations
+                                     inits="random",seed=12345,cores=my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_yearonly.all.brm_ndayszero)
+```
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD.all.brm_ndayszero<-brm(formula=FFD~n_days_min_below_zero_c+
+                                    (1|year)+(1|id),
+                                  data=datadef_ndayszero,
+                            warmup=1000,iter=4000,thin=2,chains=4,
+                            # 4 chains, each with 4000 iterations
+                            inits="random",seed=12345,cores=my.cores)
+# Total of 6000 post-warmup samples
+```
+
+```{r }
+summary(univar.FFD.all.brm_ndayszero)
+```
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm_ndayszero<-brm(formula=FFD~n_days_min_below_zero_c+
+                                       (1|year)+(n_days_min_below_zero_c|id),
+                                     data=datadef_ndayszero,
+                           warmup=1000,iter=4000,thin=2,chains=4,
+                           inits="random",seed=12345,cores=my.cores,
+                           sample_prior="yes")
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm_ndayszero) 
+```
+```{r eval=FALSE, include=FALSE}
+univar.FFD_yearonly.all.brm_ndayszero <- add_criterion(univar.FFD_yearonly.all.brm_ndayszero,"loo")
+univar.FFD.all.brm_ndayszero <- add_criterion(univar.FFD.all.brm_ndayszero,"loo")
+univar.FFD_RR.all.brm_ndayszero <- add_criterion(univar.FFD_RR.all.brm_ndayszero,"loo")
+```
+
+```{r}
+loo_comp_ndayszero<-loo_compare(univar.FFD_yearonly.all.brm_ndayszero,
+                                univar.FFD.all.brm_ndayszero,
+                                univar.FFD_RR.all.brm_ndayszero,
+                                criterion="loo")
+```
+
+```{r}
+loo_comp_ndayszero
+```
+
+```{r}
+bayes_R2(univar.FFD_yearonly.all.brm_ndayszero)
+bayes_R2(univar.FFD.all.brm_ndayszero)
+bayes_R2(univar.FFD_RR.all.brm_ndayszero)
+```
+
+```{r}
+BLUPs_MCMC.all.brms_ndayszero  <- cbind(as.factor(c(1:837)),
+                                        as.data.frame(ranef(
+                                          univar.FFD_RR.all.brm_ndayszero)$id)
+                                        [c(1:2,5:6)])
+colnames(BLUPs_MCMC.all.brms_ndayszero) <- c("id", "intercept_ndayszero",
+                                             "intercept_sd_ndayszero",
+                                             "slope_ndayszero",
+                                             "slope_sd_ndayszero")
+with(BLUPs_MCMC.all.brms_ndayszero,cor(intercept_ndayszero,slope_ndayszero)) 
+# highly correlated!
+```
+
+```{r}
+datadef_ndayszero<-datadef_ndayszero%>%
+  left_join(BLUPs_MCMC.all.brms_ndayszero%>%
+              dplyr::select(intercept_ndayszero,intercept_sd_ndayszero,
+                            slope_ndayszero,slope_sd_ndayszero)%>%
+              rownames_to_column(var="id"))
+```
+
+```{r}
+predict_id_ndayszero<-ggpredict(univar.FFD_RR.all.brm_ndayszero,
+                                terms=c("n_days_min_below_zero_c","id"),
+                                type="random")
+predict_mean_ndayszero<-ggpredict(univar.FFD_RR.all.brm_ndayszero,
+                                  terms=c("n_days_min_below_zero_c"),
+                                  type="random")
+```
+
+```{r fig.height=10, fig.width=12}
+data_fig1_ndayszero<-full_join(data.frame(predict_id_ndayszero),
+          datadef_ndayszero%>%dplyr::select(id,slope_ndayszero)%>%group_by(id)%>%
+            summarise(slope_ndayszero=mean(slope_ndayszero))%>%rename(group=id))
+ggplot()+
+  geom_line(data=data_fig1_ndayszero,
+            aes(x=x,y=predicted,group=group,color=slope_ndayszero),
+            size=0.01,alpha=0.7)+
+  scale_color_viridis(end=0.9,option = "C")+
+  geom_line(data=data.frame(predict_mean_ndayszero),aes(x=x,y=predicted),
+            color="black",size=1)+
+  my_theme()+
+  xlab("Number of days below zero in April (mean-centered)")+
+  ylab("Predicted FFD")
+```
+
+## Figure reponse letter
+
+```{r}
+grid.arrange(
+  ggplot()+
+    geom_line(data=data_fig1,
+              aes(x=x,y=predicted,group=group,color=slope),
+              size=0.01,alpha=0.7)+
+    scale_color_viridis(end=0.9,option = "C")+
+    geom_line(data=data.frame(predict_mean_2),aes(x=x,y=predicted),
+              color="black",size=1)+
+    my_theme()+scale_y_continuous(limits=c(45,65))+
+    xlab("April temperature (mean-centered)")+
+    ylab("Predicted FFD"),
+  ggplot()+
+    geom_line(data=data_fig1_var,
+              aes(x=x,y=predicted,group=group,color=slope_var),
+              size=0.01,alpha=0.7)+
+    scale_color_viridis(end=0.9,option = "C")+
+    geom_line(data=data.frame(predict_mean_var),aes(x=x,y=predicted),
+              color="black",size=1)+
+    my_theme()+scale_y_continuous(limits=c(45,65))+
+    xlab("Variance in April temperature (mean-centered)")+
+    ylab("Predicted FFD"),
+  ggplot()+
+    geom_line(data=data_fig1_ndayszero,
+              aes(x=x,y=predicted,group=group,color=slope_ndayszero),
+              size=0.01,alpha=0.7)+
+    scale_color_viridis(end=0.9,option = "C")+
+    geom_line(data=data.frame(predict_mean_ndayszero),aes(x=x,y=predicted),
+              color="black",size=1)+
+    my_theme()+scale_y_continuous(limits=c(45,65))+
+    xlab("Number of days below zero in April (mean-centered)")+
+    ylab("Predicted FFD"),
+  ncol=3
+)
+```
+
+## Differences between periods in RNs to temperature
+
+```{r eval=FALSE, include=FALSE}
+univar.FFD_RR.all.brm_periods<-brm(formula=FFD~cmean_4*period,
+                           data=datadef,
+                           warmup = 1000,iter = 4000,thin=2,chains=4,
+                           inits = "random",seed = 12345,cores = my.cores,
+                           sample_prior="yes",control=list(adapt_delta=0.99))
+# Total of 6000 post-warmup samples
+```
+
+```{r}
+summary(univar.FFD_RR.all.brm_periods) 
+```
+
+```{r}
+grid.arrange(
+  ggplot(as.data.frame(conditional_effects(
+    univar.FFD_RR.all.brm_periods)$'cmean_4'),
+    aes(x=cmean_4,y=estimate__,ymin=lower__,ymax=upper__))+
+    geom_ribbon(alpha=0.3)+geom_line()+
+    xlab("April temperature (mean-centered)")+ylab("Predicted FFD")+
+    my_theme(),
+  ggplot(as.data.frame(conditional_effects(
+    univar.FFD_RR.all.brm_periods)$'period'),
+    aes(x=period,y=estimate__,ymin=lower__,ymax=upper__))+
+    geom_errorbar()+geom_point(size=2)+
+    xlab("Period")+ylab("Predicted FFD")+
+    my_theme(),
+  ggplot(as.data.frame(conditional_effects(
+    univar.FFD_RR.all.brm_periods)$'cmean_4:period'),
+    aes(x=cmean_4,y=estimate__,ymin=lower__,ymax=upper__))+
+    geom_ribbon(aes(fill=period),alpha=0.3)+geom_line(aes(color=period),size=1)+
+    xlab("April temperature (mean-centered)")+ylab("Predicted FFD")+
+    my_theme(),
+  ncol=3)
+```
+
+# Session information
+
+```{r include=FALSE}
+sessionInfo()
+```
